@@ -70,7 +70,7 @@ The system SHALL apply a timeout to every request. The system SHALL retry a read
 
 #### Scenario: Write request times out
 - **WHEN** a write request times out or returns HTTP 502
-- **THEN** the system sends no second write request, and the error says that the deploy state on FC is not known and names `fcm bench show <bench>`
+- **THEN** the system sends no second write request, and the error says that the deploy state on FC is not known and names `fcm bench-show <bench>`
 
 ### Requirement: Write method allowlist
 The write allowlist SHALL hold only `press.api.bench.deploy_and_update`. The system SHALL send a write call as an HTTP POST with a JSON body and the team header. Only the deploy command SHALL use the write path.

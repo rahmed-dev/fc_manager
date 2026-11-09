@@ -7,43 +7,51 @@ Defines the shape of every `fcm` command and what the user sees from it: one com
 ## Requirements
 
 ### Requirement: Noun-verb command grammar
-Every command SHALL have the form `fcm <noun> <verb> [TARGET] [options]`. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural or alias forms of a command.
+Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one command word that joins the noun and the verb with a hyphen. A space in a command line SHALL always separate the command word from an argument or an option. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural, two-word, or alias forms of a command. When the user gives a plural noun or the old two-word form, the system SHALL exit with code 2 and name the hyphenated command. The help SHALL list all commands in one list, grouped by noun.
 
 #### Scenario: Singular noun
-- **WHEN** the user runs `fcm site list`
+- **WHEN** the user runs `fcm site-list`
 - **THEN** the system lists sites
 
 #### Scenario: Plural form
 - **WHEN** the user runs `fcm sites`
-- **THEN** the system exits with code 2 and suggests `fcm site list`
+- **THEN** the system exits with code 2 and suggests `fcm site-list`
+
+#### Scenario: Old two-word form
+- **WHEN** the user runs `fcm bench list --team acme`
+- **THEN** the system exits with code 2, sends no request to FC, and suggests `fcm bench-list`
+
+#### Scenario: Help grouped by noun
+- **WHEN** the user runs `fcm --help`
+- **THEN** the help lists `profile-add`, `profile-list`, `profile-test`, `profile-remove`, `team-list`, `bench-list`, `bench-show`, `bench-deploy`, `site-list`, and `site-show`, in groups for Profile, Team, Bench, and Site
 
 ### Requirement: Fixed verb set
 The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The system SHALL use only the verb `deploy` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
 
 #### Scenario: Detail of one item
 - **WHEN** the user wants the details of one site
-- **THEN** the command is `fcm site show <name>`
+- **THEN** the command is `fcm site-show <name>`
 
 #### Scenario: Write verb
 - **WHEN** the user wants to deploy app updates to a bench
-- **THEN** the command is `fcm bench deploy <bench>`, and it shows a preview and asks for a typed confirmation before it changes FC
+- **THEN** the command is `fcm bench-deploy <bench>`, and it shows a preview and asks for a typed confirmation before it changes FC
 
 ### Requirement: Positional target
 When a command acts on one item, the item SHALL be the one positional argument, and it SHALL identify an item of the command's noun. A command SHALL NOT take its main target as an option. The positional argument MAY be left out only where the interactive picker applies.
 
 #### Scenario: Target is positional
-- **WHEN** the user runs `fcm profile test work`
+- **WHEN** the user runs `fcm profile-test work`
 - **THEN** the system tests the profile named `work`
 
 ### Requirement: Interactive picker for a missing or ambiguous target
 In interactive mode, when a required target is missing or matches more than one item, the system SHALL show a fuzzy-search picker. The picker SHALL list items from all teams in scope, and each entry SHALL show the item name with its team label and bench title.
 
 #### Scenario: Missing site on a terminal
-- **WHEN** the user runs `fcm site show` in a terminal with no site name
+- **WHEN** the user runs `fcm site-show` in a terminal with no site name
 - **THEN** the system shows a picker of all sites in all discovered teams, and shows the details of the site that the user picks
 
 #### Scenario: Ambiguous title on a terminal
-- **WHEN** the user runs `fcm site list --bench "Prod"` in a terminal and 2 benches have the title `Prod`
+- **WHEN** the user runs `fcm site-list --bench "Prod"` in a terminal and 2 benches have the title `Prod`
 - **THEN** the system shows a picker with the 2 benches and their team titles
 
 #### Scenario: Picker cancelled
@@ -54,25 +62,25 @@ In interactive mode, when a required target is missing or matches more than one 
 The system SHALL be in interactive mode only when stdin and stdout are both terminals and `--json` is not set. In non-interactive mode, the system SHALL NOT prompt. A missing target SHALL exit with code 2. An ambiguous target SHALL exit with code 2 and list the candidates with name, title, and team.
 
 #### Scenario: Missing target in a script
-- **WHEN** a script runs `fcm site show --json` with no site name
+- **WHEN** a script runs `fcm site-show --json` with no site name
 - **THEN** the system exits with code 2 and writes a JSON error to stderr
 
 #### Scenario: Ambiguous target in a pipe
-- **WHEN** `fcm site list --bench "Prod"` runs with stdout piped and 2 benches match
+- **WHEN** `fcm site-list --bench "Prod"` runs with stdout piped and 2 benches match
 - **THEN** the system exits with code 2 and the error lists both benches with their names and teams
 
 ### Requirement: Options only narrow or modify
 Options SHALL only narrow a result (for example `--bench`, `--status`) or modify behavior. The options `--profile`, `--team`, `--json`, and `--debug` SHALL have the same meaning on every command that accepts them.
 
 #### Scenario: Same option, same meaning
-- **WHEN** the user passes `--team acme` to `fcm bench list` and to `fcm site list`
+- **WHEN** the user passes `--team acme` to `fcm bench-list` and to `fcm site-list`
 - **THEN** both commands limit the result to team `acme`
 
 ### Requirement: Formatted output on a terminal
 When stdout is a terminal, the system SHALL show results as aligned tables with column headers. Each list SHALL end with a one-line summary of the row count and the teams covered.
 
 #### Scenario: Site list on a terminal
-- **WHEN** the user runs `fcm site list` in a terminal
+- **WHEN** the user runs `fcm site-list` in a terminal
 - **THEN** the system prints a table with headers and a summary line such as `12 sites in 3 teams`
 
 #### Scenario: Empty result
@@ -83,7 +91,7 @@ When stdout is a terminal, the system SHALL show results as aligned tables with 
 Every command that shows data SHALL accept `--json`. With `--json`, the system SHALL write only valid JSON to stdout, and SHALL write errors as JSON to stderr.
 
 #### Scenario: JSON list
-- **WHEN** the user runs `fcm bench list --json`
+- **WHEN** the user runs `fcm bench-list --json`
 - **THEN** stdout is one JSON array of bench objects and contains no other text
 
 #### Scenario: JSON error
@@ -95,7 +103,7 @@ Each error SHALL show what failed, the target (profile, team, bench, or site) wh
 
 #### Scenario: Authentication error
 - **WHEN** FC rejects the credentials of profile `work`
-- **THEN** the system prints one error that names profile `work`, says the credentials were rejected, and gives the hint `fcm profile add work --replace`
+- **THEN** the system prints one error that names profile `work`, says the credentials were rejected, and gives the hint `fcm profile-add work --replace`
 
 #### Scenario: Permission error names the team owner
 - **WHEN** FC denies a call in a team whose owner email is `owner@acme.example.com`
@@ -105,7 +113,7 @@ Each error SHALL show what failed, the target (profile, team, bench, or site) wh
 The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage or configuration error, 3 authentication error, 4 permission error, 5 not found, 6 network or server error, 7 partial failure across teams, 8 an FC job that FC accepted but that failed.
 
 #### Scenario: Not found
-- **WHEN** `fcm site show missing.example.com` finds no site
+- **WHEN** `fcm site-show missing.example.com` finds no site
 - **THEN** the exit code is 5
 
 #### Scenario: Partial failure
@@ -120,12 +128,12 @@ The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage o
 The system SHALL accept `--debug`. With `--debug`, the system SHALL write each request method name, team, HTTP status, and duration to stderr, and SHALL show the traceback for unexpected errors, with secrets redacted.
 
 #### Scenario: Debug a request
-- **WHEN** the user runs `fcm team list --debug`
+- **WHEN** the user runs `fcm team-list --debug`
 - **THEN** stderr shows each FC method called, its HTTP status, and its duration, and no secret value
 
 ### Requirement: Color control
 The system SHALL turn off color when stdout is not a terminal or when `NO_COLOR` is set.
 
 #### Scenario: Piped output
-- **WHEN** the user pipes `fcm site list` to another program
+- **WHEN** the user pipes `fcm site-list` to another program
 - **THEN** the output contains no color escape codes
