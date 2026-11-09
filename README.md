@@ -61,6 +61,64 @@ uv sync
 uv run fcm --help
 ```
 
+## The menu
+
+On a terminal, run `fcm` with no command. `fcm` asks for the bench once, and then you
+choose what to do with it. A screen looks like this:
+
+```
+work > ACME Corp > ACME Prod (bench-1234)
+? Action (type to filter, Enter to pick, Esc to go back, Ctrl+C to cancel)
+ » Show bench (bench-show)
+   Deploy app updates (bench-deploy)
+   Migrate a site (site-migrate)
+   Update a site (site-update)
+   Pick another bench
+   Quit
+```
+
+The grey line above each prompt is the target path: profile > team > bench, and > site
+after a site pick. It always shows what the next action works on.
+
+### The steps
+
+1. **Team**: pick a team. `fcm` skips this step when your login reaches one team only.
+2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
+3. **Action**: show the bench, deploy app updates, migrate a site, update a site, pick
+   another bench, or quit. Each entry names its direct command.
+4. **Site** (site actions only): pick a site of that bench, shown with its status.
+   "Update a site" lists only the sites that have an update. When only one site is left,
+   `fcm` picks it with no list and prints its name.
+
+Each action runs the same code as its direct command. A deploy, a migrate or an update
+shows the same preview and asks for the same typed confirmation. When an action ends, also
+with an error or a cancelled confirmation, the action menu of the same bench opens again.
+
+### Picker keys
+
+`fcm` has two kinds of list. A pick-one list (team, bench, action, site) takes one row. A
+checkbox list (the app and site steps of a deploy) takes any number of rows.
+
+| Key | Pick-one list | Checkbox list |
+| --- | --- | --- |
+| Up / Down | Move the pointer | Move the pointer |
+| Letters, digits | Filter the list | Filter the list |
+| Enter | Pick the row under the pointer | Confirm the checked rows |
+| Space | Pick the row (site step only) | Check or uncheck the row |
+| Esc | Go back one step | Go back one step |
+| Ctrl+C | Leave `fcm` (exit 130) | Leave `fcm` (exit 130) |
+
+In a checkbox list, a checked row shows a green `●`, and an unchecked row shows `○`. The
+deploy app step starts with no app checked.
+
+Esc goes back one step: site to action menu, action menu to bench, bench to team, and team
+out of `fcm`. Esc at the app step of a deploy goes back to the action menu. Ctrl+C during a
+deploy, migrate or update watch stops the watch only: the job continues on FC, and the
+action menu opens again.
+
+`fcm --profile NAME` opens the menu with that profile. Without a terminal, `fcm` prints the
+help.
+
 ## Add a profile
 
 A profile is one FC login. One login has one API key and one API secret, and it reaches
@@ -90,6 +148,9 @@ The first profile you add becomes the default. To use another profile for one co
 pass `--profile <name>` or set `FCM_PROFILE`.
 
 ## Commands
+
+On a terminal, `fcm` alone opens [the menu](#the-menu). Every menu action is also a direct
+command, for scripts and one-liners.
 
 Every command is one word, `fcm <noun>-<verb> [TARGET] [options]`, as in Frappe `bench
 new-site`. A space always separates the command from an argument or an option. Nouns are
@@ -142,32 +203,6 @@ teams, names the failed team, and exits with code 7.
 details. `fcm site-show` then shows what the site list already gave (team, bench, status,
 version, region, update), says that details and apps are not permitted for your role, names
 the team owner to ask, and exits with code 4.
-
-### Menu: pick the bench once, then choose what to do
-
-Run `fcm` with no command on a terminal to open the menu:
-
-1. **Team**: pick a team (skipped when your login reaches one team only).
-2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
-3. **Action**: "Show bench (bench-show)", "Deploy app updates (bench-deploy)", "Migrate a
-   site (site-migrate)", "Update a site (site-update)", "Pick another bench", or "Quit".
-4. **Site** (site actions only): pick a site of that bench. The list shows only the sites
-   of that bench, with their status. "Update a site" lists only the sites that have an
-   update. Enter or Space picks the site under the pointer. When only one site is left,
-   `fcm` picks it with no list and prints its name.
-
-Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`,
-and after a site pick `work > ACME Corp > ACME Prod (bench-1234) > erp.acme.com`. Each
-action runs the same code as its command, so a deploy, a migrate or an update shows the
-same preview and asks for the same typed confirmation. After an action ends, also with an
-error or a cancelled confirmation, the action menu of the same bench opens again.
-
-Esc goes back one step: site to action menu, action menu to bench, bench to team, team out
-of `fcm`. Esc at the app step of a deploy goes back to the action menu. Ctrl+C at a menu
-prompt ends `fcm` (exit 130). Ctrl+C during a deploy, migrate or update watch stops the
-watch only, and the action menu opens again.
-`fcm --profile NAME` opens the menu with that profile. Without a terminal, `fcm` prints the
-help.
 
 ### Deploy app updates to a bench
 
