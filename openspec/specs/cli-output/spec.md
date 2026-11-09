@@ -7,11 +7,14 @@ Defines the shape of every `fcm` command and what the user sees from it: one com
 ## Requirements
 
 ### Requirement: Noun-verb command grammar
-Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one command word that joins the noun and the verb with a hyphen. A space in a command line SHALL always separate the command word from an argument or an option. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural, two-word, or alias forms of a command. When the user gives a plural noun or the old two-word form, the system SHALL exit with code 2 and name the hyphenated command. The help SHALL list all commands in one list, grouped by noun.
+Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one command word that joins the noun and the verb with a hyphen. A space SHALL always separate the command word from an argument or an option. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural, two-word, or alias forms of a command.
 
 #### Scenario: Singular noun
 - **WHEN** the user runs `fcm site-list`
 - **THEN** the system lists sites
+
+### Requirement: Wrong command form names the right command
+When the user gives a plural noun or the old two-word form, the system SHALL exit with code 2, send no request to FC, and name the hyphenated command.
 
 #### Scenario: Plural form
 - **WHEN** the user runs `fcm sites`
@@ -20,6 +23,9 @@ Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one co
 #### Scenario: Old two-word form
 - **WHEN** the user runs `fcm bench list --team acme`
 - **THEN** the system exits with code 2, sends no request to FC, and suggests `fcm bench-list`
+
+### Requirement: Help grouped by noun
+The help SHALL list all commands in one list, grouped by noun.
 
 #### Scenario: Help grouped by noun
 - **WHEN** the user runs `fcm --help`
