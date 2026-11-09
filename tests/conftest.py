@@ -150,6 +150,20 @@ class FakeFC:
     team_errors: dict = field(default_factory=dict)  # team -> (status, body)
     account_error: tuple | None = None
     calls: list = field(default_factory=list)
+    # deploy: per-bench deploy_information bodies (a sequence; the last one repeats),
+    # deploy_status bodies and build docs (sequences, the last repeats), and POST bodies.
+    deploy_infos: dict = field(default_factory=dict)
+    statuses: list = field(default_factory=list)
+    builds: list = field(default_factory=list)
+    posts: list = field(default_factory=list)
+    post_error: tuple | None = None  # (status, body) for the deploy POST
+    teams_seen: list = field(default_factory=list)
+
+    @staticmethod
+    def _next(seq: list, default):
+        if not seq:
+            return default
+        return seq.pop(0) if len(seq) > 1 else seq[0]
 
     def _team_error(self, request):
         team = request.headers.get("X-Press-Team")
@@ -170,8 +184,24 @@ class FakeFC:
                 json={"message": {"user": {"email": "owner@example.com"}, "teams": self.teams}},
             )
         team, error = self._team_error(request)
+        self.teams_seen.append((method, team, request.method))
         if error is not None:
             return error
+        if method == "press.api.bench.deploy_and_update":
+            self.posts.append(json.loads(request.content))
+            if self.post_error:
+                status, body = self.post_error
+                return httpx.Response(status, json=body)
+            return httpx.Response(200, json={"message": "pipeline-1"})
+        if method == "press.api.bench.deploy_information":
+            seq = self.deploy_infos.get(request.url.params["name"])
+            if seq is None:
+                return httpx.Response(403, json=fixture("error_permission.json"))
+            return httpx.Response(200, json={"message": self._next(seq, {})})
+        if method == "press.api.bench.deploy_status":
+            return httpx.Response(200, json={"message": self._next(self.statuses, {})})
+        if method == "press.api.client.get":
+            return httpx.Response(200, json={"message": self._next(self.builds, {})})
         if method == "press.api.bench.all":
             return httpx.Response(200, json={"message": self.benches.get(team, [])})
         if method == "press.api.site.all":
@@ -221,6 +251,7 @@ def default_fake() -> FakeFC:
         ],
         "team-beta": [_site("erp.beta.example.com", "team-beta", "bench-0981", "Prod")],
     }
+    fake.deploy_infos = {"bench-1234": [fixture("bench_deploy_information.json")["message"]]}
     return fake
 
 
@@ -234,11 +265,14 @@ def fc():
 
 @pytest.fixture
 def strict_fc():
-    """Like `fc`, but fails the test on a request outside the read-only allowlist."""
-    from fc_manager.api.client import READ_ONLY_METHODS
+    """Like `fc`, but fails the test on a request outside the allowlists: GET for read
+    methods, POST for write methods."""
+    from fc_manager.api.client import READ_ONLY_METHODS, WRITE_METHODS
 
     fake = default_fake()
     with respx.mock(base_url=BASE, assert_all_called=False, assert_all_mocked=True) as router:
         for method in READ_ONLY_METHODS:
             router.get(f"/api/method/{method}").mock(side_effect=fake.handle)
+        for method in WRITE_METHODS:
+            router.post(f"/api/method/{method}").mock(side_effect=fake.handle)
         yield fake

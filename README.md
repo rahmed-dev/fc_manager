@@ -1,9 +1,11 @@
 # fc_manager
 
 `fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
-all the teams that your FC login can reach.
+all the teams that your FC login can reach, and to deploy app updates to a bench.
 
-This version is **read-only**. It never changes anything on FC.
+Only one command changes FC: `fcm bench deploy`. It shows a preview of the target and the
+changes, and starts nothing until you type the bench title. Every other command is
+read-only.
 
 ## Install
 
@@ -61,6 +63,8 @@ fcm site list --bench "ACME Prod"              # sites on one bench, by title or
 fcm site list --status update-available        # active, inactive, broken, trial, update-available
 fcm site show erp.acme.com                     # one site with its installed apps
 fcm site show                                  # on a terminal: pick the site from a list
+fcm bench show "ACME Prod"                     # apps with updates, sites, a running deploy
+fcm bench deploy "ACME Prod"                   # deploy app updates (see below)
 ```
 
 Options that work on every command:
@@ -94,6 +98,43 @@ details. `fcm site show` then shows what the site list already gave (team, bench
 version, region, update), says that details and apps are not permitted for your role, names
 the team owner to ask, and exits with code 4.
 
+### Deploy app updates to a bench
+
+`fcm bench deploy` does what the FC dashboard deploy dialog does. On a terminal it walks
+you through these steps:
+
+1. **Team, then bench.** Give the bench by name or title, or pick it: first the team
+   (shown by title or owner email), then a bench of that team. With `--team`, `fcm` skips
+   the team step. After this step, every FC request goes to the team of that bench only.
+2. **App updates.** All apps with an update are selected. Clear the ones you do not want.
+3. **Sites.** The sites on the bench, **none selected**. With no site selected, the deploy
+   goes to the bench only: the sites stay on the old bench, and FC shows "update
+   available" for them. A backup is taken before each selected site is updated.
+4. **Preview.** The profile, the team and its owner, the bench, each app from version to
+   version, removed apps, and the sites or "Bench only".
+5. **Confirm.** Type the bench title exactly. Any other input cancels, and nothing is sent.
+6. **Progress.** `fcm` follows the build step by step until it ends. Ctrl+C stops the
+   watch only: the deploy continues on FC. Run `fcm bench show <bench>` to look again.
+
+Esc goes back one step. When FC reports no update, or a deploy is already running on the
+bench, `fcm` says so and sends nothing.
+
+```bash
+fcm bench deploy --dry-run                              # pick team and bench, preview only
+fcm bench deploy bench-1234 --app erpnext --app hrms \
+    --site erp.acme.com --confirm bench-1234           # in a script
+fcm bench deploy bench-1234 --all-apps --confirm bench-1234 --no-wait --json
+```
+
+Without a terminal (a script, a pipe or `--json`), `fcm` never prompts. You must give the
+apps (`--app`, repeatable, or `--all-apps`), and `--confirm` with the bench FC name.
+`--site` is repeatable; with no `--site`, the deploy is bench only. There is no `--yes`.
+With `--json`, the progress is one JSON object per line.
+
+Not in this version: in-place update, patch deploy, skipping backups or failing patches,
+and an override of the FC "will fail" check. When FC refuses a deploy, `fcm` shows the FC
+message and stops. Use the FC dashboard for those cases.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -104,8 +145,9 @@ the team owner to ask, and exits with code 4.
 | 3 | Authentication error (FC rejected the key) |
 | 4 | Permission error |
 | 5 | Not found |
-| 6 | Network, server or rate-limit error |
+| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, or a site update not confirmed in 30 minutes) |
 | 7 | Partial failure across teams |
+| 8 | FC accepted a deploy, but it failed on FC (a failed build step) |
 
 ## Credentials and security
 
@@ -130,8 +172,14 @@ the team owner to ask, and exits with code 4.
 - **Redaction.** `fcm` masks the key, the secret and the `Authorization` header in all
   output, errors and `--debug` output.
 - **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
-- **Read-only.** The HTTP client has a fixed allowlist of read-only FC API methods. A call
-  to any other method fails inside `fcm` before any request goes out.
+- **Allowlists.** The HTTP client has a fixed allowlist of read-only FC API methods (GET)
+  and a separate write allowlist with one method, `press.api.bench.deploy_and_update`
+  (POST). Only `fcm bench deploy` uses the write path. A call to any other method fails
+  inside `fcm` before any request goes out. The generic FC document read
+  (`press.api.client.get`) is allowed for the deploy build doctype only.
+- **No retry of a write.** A deploy request is sent one time only. When FC does not
+  confirm it (a timeout or a server error), `fcm` says that the result on FC is not known
+  and tells you to run `fcm bench show`. A retry could start a second deploy.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
 

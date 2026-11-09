@@ -3,6 +3,7 @@ import pytest
 from fc_manager.errors import (
     EXIT_CODES,
     AuthError,
+    DeployFailed,
     ErrorKind,
     FcmError,
     MethodNotAllowed,
@@ -14,6 +15,7 @@ from fc_manager.errors import (
     ServerError,
     UsageError,
     ValidationFailed,
+    WriteUnknown,
 )
 
 
@@ -31,6 +33,8 @@ from fc_manager.errors import (
         (ServerError("x"), 6),
         (RateLimited("x"), 6),
         (PartialFailure("x", failures=[]), 7),
+        (WriteUnknown("x"), 6),
+        (DeployFailed("x", step="Install Apps"), 8),
     ],
 )
 def test_exit_codes_match_cli_output_spec(error, code):

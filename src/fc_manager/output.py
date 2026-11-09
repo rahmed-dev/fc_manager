@@ -64,6 +64,11 @@ class Output:
         self._stdout.write(json.dumps(data, indent=2, default=str) + "\n")
         self._stdout.flush()
 
+    def emit_json_line(self, data: Any) -> None:
+        """One compact JSON object per line (a stream, for example deploy progress)."""
+        self._stdout.write(json.dumps(data, default=str) + "\n")
+        self._stdout.flush()
+
     def table(
         self,
         columns: Sequence[Column],

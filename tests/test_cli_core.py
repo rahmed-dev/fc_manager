@@ -7,7 +7,7 @@ import typer
 
 from fc_manager.cli import app as app_module
 from fc_manager.cli import picker
-from fc_manager.cli.app import NOUNS, READ_VERBS, app
+from fc_manager.cli.app import NOUNS, READ_VERBS, WRITE_VERBS, app
 from fc_manager.errors import UsageError
 
 # --- 3.2: top-level handler -----------------------------------------------------------
@@ -81,7 +81,7 @@ def test_every_command_is_noun_verb_with_a_fixed_verb():
         verbs = group.list_commands(typer.Context(group))
         assert verbs, noun
         for verb in verbs:
-            assert verb in READ_VERBS, f"fcm {noun} {verb}: verb not in the fixed set"
+            assert verb in READ_VERBS | WRITE_VERBS, f"fcm {noun} {verb}: verb not in the fixed set"
             command = group.get_command(typer.Context(group), verb)
             assert not hasattr(command, "list_commands"), f"fcm {noun} {verb} nests deeper"
 

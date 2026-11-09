@@ -7,9 +7,12 @@ Run it yourself with your own key. It only calls read-only FC methods (the same 
     uv run python scripts/fc_spike.py            # writes anonymized fixtures to a temp dir
     uv run python scripts/fc_spike.py --write    # writes them to tests/fixtures/fc/
 
-It answers two questions:
+It answers three questions:
   1. Does the X-Press-Team header select the team for press.api.site.all / bench.all?
   2. What do real FC responses and error bodies look like?
+  3. What do the deploy read methods return (deploy_information, deploy_status, and the
+     Deploy Candidate Build doc through client.get)?
+     The spike never calls a deploy (write) method.
 
 Review every fixture before you commit it. The anonymizer replaces names, titles, emails,
 IP addresses and host names, but you are the last check.
@@ -28,7 +31,8 @@ from typing import Any
 
 import httpx
 
-from fc_manager.api.client import DEFAULT_BASE_URL, READ_ONLY_METHODS, validate_base_url
+from fc_manager.api.client import DEFAULT_BASE_URL, check_read_method, validate_base_url
+from fc_manager.errors import MethodNotAllowed
 from fc_manager.redact import Credentials, redact
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "fc"
@@ -65,8 +69,10 @@ class Spike:
     def get(
         self, method: str, team: str | None = None, secret: str | None = None, **params: Any
     ) -> httpx.Response:
-        if method not in READ_ONLY_METHODS:
-            raise SystemExit(f"refusing non-allowlisted method {method}")
+        try:
+            check_read_method(method, params)
+        except MethodNotAllowed as exc:
+            raise SystemExit(f"refusing: {exc}") from exc
         auth = (
             self.creds.authorization() if secret is None else f"Token {self.creds.api_key}:{secret}"
         )
@@ -149,6 +155,51 @@ def teams_in(response: httpx.Response) -> list[str]:
     return sorted({str(r.get("team")) for r in rows if isinstance(r, dict)})
 
 
+MAX_BENCHES_FOR_DEPLOY = 15
+OUTPUT_CHARS = 160
+
+
+def trim_lists(node: Any, limit: int = MAX_ROWS) -> Any:
+    """Trim every nested list to `limit` items (releases, build steps, sites)."""
+    if isinstance(node, dict):
+        return {k: trim_lists(v, limit) for k, v in node.items()}
+    if isinstance(node, list):
+        return [trim_lists(v, limit) for v in node[:limit]]
+    return node
+
+
+def slim_candidate(data: Any) -> Any:
+    """Build step output holds raw build logs (paths, repository URLs). Keep a short head,
+    and keep the first 2 steps of each stage so the fixture shows every stage."""
+    message = data.get("message") if isinstance(data, dict) else None
+    if isinstance(message, dict):
+        kept, per_stage = [], {}
+        for step in message.get("build_steps") or []:
+            if not isinstance(step, dict):
+                continue
+            stage = step.get("stage")
+            per_stage[stage] = per_stage.get(stage, 0) + 1
+            if per_stage[stage] > 2:
+                continue
+            if isinstance(step.get("output"), str):
+                step["output"] = step["output"][:OUTPUT_CHARS]
+            kept.append(step)
+        message["build_steps"] = kept
+    return data
+
+
+def slim_releases(data: Any) -> Any:
+    """Release messages are commit messages, which can be private. Keep a short head of
+    public releases only."""
+    message = data.get("message") if isinstance(data, dict) else None
+    for app in (message or {}).get("apps") or [] if isinstance(message, dict) else []:
+        for release in app.get("releases") or []:
+            text = str(release.get("message") or "")
+            public = str(release.get("public")) in ("1", "True", "true")
+            release["message"] = text.splitlines()[0][:60] if public and text else "commit message"
+    return data
+
+
 def trim(data: Any) -> Any:
     if isinstance(data, dict) and isinstance(data.get("message"), list):
         return {**data, "message": data["message"][:MAX_ROWS]}
@@ -219,6 +270,48 @@ def main() -> int:
         raw["site_installed_apps.json"] = trim(
             body(spike.get("press.api.site.installed_apps", team=team, name=site))
         )
+    # Question 3: deploy read methods (GET only; no deploy is ever started).
+    print("\nDeploy read methods:")
+    deploy_seen = 0
+    for team in teams[:MAX_TEAMS]:
+        rows = (body(spike.get("press.api.bench.all", team=team)) or {}).get("message") or []
+        for bench in rows[:MAX_BENCHES_FOR_DEPLOY]:
+            info = spike.get("press.api.bench.deploy_information", team=team, name=bench["name"])
+            data = body(info)
+            message = data.get("message") if isinstance(data, dict) else None
+            if not info.is_success or not isinstance(message, dict):
+                print(f"  deploy_information -> HTTP {info.status_code}")
+                if "error_deploy_information.json" not in raw:
+                    raw["error_deploy_information.json"] = data
+                continue
+            deploy_seen += 1
+            has_update = bool(message.get("update_available"))
+            if "bench_deploy_information.json" not in raw or (
+                has_update and not raw.get("_deploy_has_update")
+            ):
+                raw["bench_deploy_information.json"] = trim_lists(slim_releases(data), 12)
+                raw["_deploy_has_update"] = has_update
+                status = spike.get("press.api.bench.deploy_status", team=team, name=bench["name"])
+                raw["bench_deploy_status.json"] = body(status)
+                print(f"  deploy_status -> HTTP {status.status_code}")
+                last = message.get("last_deploy") or {}
+                if isinstance(last, dict) and last.get("name"):
+                    build = spike.get(
+                        "press.api.client.get",
+                        team=team,
+                        doctype="Deploy Candidate Build",
+                        name=last["name"],
+                    )
+                    build_body = trim_lists(body(build), 200)
+                    raw["deploy_candidate_build.json"] = slim_candidate(build_body)
+                    print(f"  client.get Deploy Candidate Build -> HTTP {build.status_code}")
+            if raw.get("_deploy_has_update"):
+                break
+        if raw.get("_deploy_has_update"):
+            break
+    print(f"  benches read: {deploy_seen}, update found: {bool(raw.get('_deploy_has_update'))}")
+    raw.pop("_deploy_has_update", None)
+
     bad = spike.get("press.api.account.get", secret=secret + "-wrong")
     raw["error_auth.json"] = body(bad)
     print(f"\nwrong secret -> HTTP {bad.status_code}")

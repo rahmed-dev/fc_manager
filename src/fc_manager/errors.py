@@ -16,6 +16,7 @@ class ErrorKind(StrEnum):
     SERVER = "server"
     NETWORK = "network"
     PARTIAL = "partial_failure"
+    JOB_FAILED = "job_failed"
 
 
 EXIT_CODES: dict[ErrorKind, int] = {
@@ -29,6 +30,7 @@ EXIT_CODES: dict[ErrorKind, int] = {
     ErrorKind.SERVER: 6,
     ErrorKind.NETWORK: 6,
     ErrorKind.PARTIAL: 7,
+    ErrorKind.JOB_FAILED: 8,
 }
 
 
@@ -100,7 +102,30 @@ class PartialFailure(FcmError):
         self.failures = failures
 
 
+class WriteUnknown(FcmError):
+    """FC got a write request but did not confirm it (timeout or 5xx). Never retried."""
+
+    kind = ErrorKind.SERVER
+
+
+class DeployFailed(FcmError):
+    """FC accepted a deploy, and the deploy then failed on FC (exit 8)."""
+
+    kind = ErrorKind.JOB_FAILED
+
+    def __init__(self, message: str, *, step: str | None = None, **kwargs) -> None:
+        super().__init__(message, **kwargs)
+        self.step = step
+
+
+class SiteUpdateUnknown(FcmError):
+    """The bench deploy succeeded, but FC did not confirm the site updates in time (exit 6).
+    The result is not known: the update can still run, or it failed on FC."""
+
+    kind = ErrorKind.SERVER
+
+
 class MethodNotAllowed(FcmError):
-    """Code asked the API client for a method outside the read-only allowlist."""
+    """Code asked the API client for a method outside its allowlists."""
 
     kind = ErrorKind.UNEXPECTED

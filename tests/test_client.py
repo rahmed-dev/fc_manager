@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -215,3 +217,128 @@ def test_same_host_redirect_is_a_server_error():
     )
     with pytest.raises(ServerError):
         make_client().call("press.api.site.all", team="t")
+
+
+# --- bench-deploy 2.1: deploy read methods and the client.get doctype check --------------
+
+
+@respx.mock
+def test_client_get_allowed_for_deploy_build_only():
+    route = respx.get(method_url("press.api.client.get")).respond(
+        json=fixture("deploy_candidate_build.json")
+    )
+    doc = make_client().call(
+        "press.api.client.get", team="t", doctype="Deploy Candidate Build", name="b-1"
+    )
+    assert doc["status"] == "Success"
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("doctype", ["Site", "Team", "Release Group", None])
+def test_client_get_other_doctype_sends_nothing(doctype):
+    with respx.mock(assert_all_called=False) as router:
+        route = router.route().respond(json={"message": {}})
+        with pytest.raises(MethodNotAllowed):
+            make_client().call("press.api.client.get", team="t", doctype=doctype, name="x")
+        assert route.call_count == 0
+
+
+def test_write_method_through_read_path_sends_nothing():
+    with respx.mock(assert_all_called=False) as router:
+        route = router.route().respond(json={"message": "x"})
+        with pytest.raises(MethodNotAllowed):
+            make_client().call("press.api.bench.deploy_and_update", team="t", name="b")
+        assert route.call_count == 0
+
+
+# --- bench-deploy 2.2: the write path --------------------------------------------------
+
+
+@respx.mock
+def test_write_sends_one_post_with_json_body_and_team():
+    route = respx.post(method_url("press.api.bench.deploy_and_update")).respond(
+        json={"message": "pipeline-1"}
+    )
+    body = {
+        "name": "bench-1",
+        "apps": [{"app": "erpnext"}],
+        "sites": [],
+        "run_will_fail_check": True,
+    }
+    assert make_client().write("press.api.bench.deploy_and_update", team="acme", **body) == (
+        "pipeline-1"
+    )
+    request = route.calls.last.request
+    assert request.method == "POST"
+    assert request.headers["X-Press-Team"] == "acme"
+    assert request.headers["Authorization"] == f"Token {KEY}:{SECRET}"
+    assert json.loads(request.content) == body
+
+
+@pytest.mark.parametrize(
+    "method", ["press.api.bench.all", "press.api.site.get", "press.api.bench.deploy"]
+)
+def test_write_refuses_other_methods(method):
+    with respx.mock(assert_all_called=False) as router:
+        route = router.route().respond(json={"message": "x"})
+        with pytest.raises(MethodNotAllowed):
+            make_client().write(method, team="t", name="b")
+        assert route.call_count == 0
+
+
+def test_write_needs_a_team():
+    with respx.mock(assert_all_called=False) as router:
+        route = router.route().respond(json={"message": "x"})
+        with pytest.raises(MethodNotAllowed):
+            make_client().write("press.api.bench.deploy_and_update", team="", name="b")
+        assert route.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        httpx.Response(502),
+        httpx.Response(500, json={"exc_type": "Exception"}),
+        httpx.ReadTimeout("t"),
+    ],
+)
+def test_write_is_never_retried_and_result_is_unknown(outcome):
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        route = router.post(method_url("press.api.bench.deploy_and_update"))
+        if isinstance(outcome, Exception):
+            route.side_effect = outcome
+        else:
+            route.return_value = outcome
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
+        assert route.call_count == 1
+    assert "not known" in info.value.message
+    assert info.value.hint == "Run: fcm bench show bench-1"
+    assert info.value.exit_code == 6
+
+
+def test_write_connect_error_says_nothing_reached_fc():
+    with respx.mock() as router:
+        route = router.post(method_url("press.api.bench.deploy_and_update"))
+        route.side_effect = httpx.ConnectError("refused")
+        with pytest.raises(NetworkError) as info:
+            make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
+        assert route.call_count == 1
+    assert info.value.hint.startswith("Nothing reached FC.")
+
+
+@respx.mock
+def test_write_validation_error_is_not_retried():
+    route = respx.post(method_url("press.api.bench.deploy_and_update")).respond(
+        417,
+        json={
+            "exc_type": "ValidationError",
+            "_server_messages": json.dumps([json.dumps({"message": "Deploy already in progress"})]),
+        },
+    )
+    with pytest.raises(ValidationFailed) as info:
+        make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
+    assert route.call_count == 1
+    assert "already in progress" in (info.value.server_message or "")
