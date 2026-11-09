@@ -11,16 +11,55 @@ the site name. Every other command is read-only.
 
 ## Install
 
-You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
+You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you if your
+system has none.
 
 ```bash
-git clone <this repository> fc_manager
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.0.0
+```
+
+uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
+(`~/.local/bin`). If you use pipx instead, run
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.0.0`.
+
+### First run
+
+Run `fcm` in a terminal:
+
+```bash
+fcm
+```
+
+With no profile set up, `fcm` starts a short setup. It asks for a profile name (Enter keeps
+`default`), the FC API key, and the API secret. To make a key, see
+[Add a profile](#add-a-profile). `fcm` checks the key with FC, saves the secret in the OS
+keyring, and opens the menu. After that, `fcm` opens the menu at once.
+
+The secret prompt shows what you type or paste, so you can check the paste. The secret then
+stays in your terminal scrollback: on a shared screen, clear the terminal after the setup.
+
+On a server with no keyring, set `FCM_API_KEY` and `FCM_API_SECRET` in the environment
+instead (see [Credentials and security](#credentials-and-security)).
+
+### Upgrade and uninstall
+
+```bash
+uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.1.0   # a newer tag
+fcm --version
+uv tool uninstall fc-manager
+```
+
+An uninstall keeps your profiles. To remove them too, run `fcm profile-remove <name>` for
+each profile before the uninstall.
+
+### From a clone
+
+```bash
+git clone https://github.com/rahmed-dev/fc_manager.git
 cd fc_manager
 uv sync
 uv run fcm --help
 ```
-
-To put `fcm` on your PATH, run `uv tool install .` from the repository root.
 
 ## Add a profile
 
@@ -29,7 +68,7 @@ every team that the login is a member of. You do not list teams yourself; `fcm` 
 
 1. In the FC dashboard, open **Settings > Profile & Team > API Access** and create an API key.
    FC shows the secret one time only.
-2. Add the profile. `fcm` asks for the key, and then for the secret in a hidden prompt:
+2. Add the profile (the [first run](#first-run) does this step for you). `fcm` asks for the key, and then for the secret:
 
    ```bash
    fcm profile-add work

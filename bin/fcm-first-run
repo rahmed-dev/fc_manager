@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Dev-only: live check of the fcm first-run setup.
+# Runs fcm with an empty, temporary config and no FCM_* variables, so the setup starts.
+# Use the profile name "first-run-check". At exit, every profile of the temporary config
+# is removed, keyring entry included, and the temporary config is deleted.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp="$(mktemp -d)"
+export FCM_CONFIG_DIR="$tmp"
+unset FCM_API_KEY FCM_API_SECRET FCM_PROFILE
+
+cleanup() {
+  local failed=0
+  if [[ -f "$tmp/config.toml" ]]; then
+    for name in $(sed -n 's/^\[profiles\.\(.*\)\]$/\1/p' "$tmp/config.toml" | tr -d '"'); do
+      uv run --project "$root" fcm profile-remove "$name" --yes >/dev/null 2>&1 \
+        && echo "fcm-first-run: removed test profile $name" \
+        || { failed=1; echo "fcm-first-run: could not remove profile $name. Run: FCM_CONFIG_DIR=$tmp uv run fcm profile-remove $name --yes" >&2; }
+    done
+  fi
+  if [[ $failed -eq 0 ]]; then rm -rf "$tmp"; fi
+}
+trap cleanup EXIT
+
+echo "fcm-first-run: empty config in $tmp. At the profile name prompt, type: first-run-check"
+uv run --project "$root" fcm "$@"

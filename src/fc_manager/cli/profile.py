@@ -27,7 +27,8 @@ def _prompt_key() -> str:
 
 
 def _prompt_secret() -> str:
-    return typer.prompt("FC API secret (hidden)", hide_input=True)
+    # Visible on purpose (maintainer decision, 2026-11-09): a hidden paste cannot be checked.
+    return typer.prompt("FC API secret")
 
 
 def _confirm(question: str) -> bool:
@@ -49,20 +50,18 @@ def _require_profile(cfg: config.Config, name: str) -> config.Profile:
     return cfg.profiles[name]
 
 
-@app.command("profile-add", rich_help_panel="Profile")
-def add(
-    name: NameArg,
-    base_url: Annotated[
-        str, typer.Option("--base-url", help="FC base URL (HTTPS only).")
-    ] = DEFAULT_BASE_URL,
-    replace: Annotated[
-        bool, typer.Option("--replace", help="Replace the credentials of an existing profile.")
-    ] = False,
-    json_mode: JsonOpt = False,
-    debug: DebugOpt = False,
-) -> None:
-    """Add a profile. Reads the API secret from a hidden prompt and checks it with FC."""
-    out = Output(json_mode=json_mode)
+def _check_token(value: str, what: str) -> None:
+    """An FC API key or secret is one word. Refuse a pasted label or a key-and-secret
+    pair before any FC request. The message never shows the value."""
+    if any(char.isspace() or char == ":" for char in value):
+        raise UsageError(
+            f"This does not look like {what}: it has a space or a ':'",
+            hint="Paste the value only, with no label such as 'Key:'. Nothing was sent to FC.",
+        )
+
+
+def _precheck(name: str, base_url: str, replace: bool) -> tuple[config.Config, str]:
+    """The checks before any prompt: name, base URL, duplicate, keyring."""
     _check_name(name)
     base_url = validate_base_url(base_url)
     cfg = config.load()
@@ -75,15 +74,26 @@ def add(
         raise UsageError(
             "No secure OS keyring is available on this host", hint=credentials.ENV_HINT
         )
-    if not picker.is_interactive(json_mode):
-        raise UsageError(
-            "fcm profile-add needs a terminal to read the secret",
-            hint="Run it in a terminal without --json. " + credentials.ENV_HINT,
-        )
+    return cfg, base_url
 
+
+def add_profile(
+    out: Output,
+    name: str,
+    base_url: str = DEFAULT_BASE_URL,
+    *,
+    replace: bool = False,
+    debug: bool = False,
+):
+    """Ask for the key and the secret, check them with FC (read-only), then store
+    the secret in the keyring and the profile in the config file. The first profile
+    becomes the default. Returns the FC account. Used by profile-add and the first run."""
+    cfg, base_url = _precheck(name, base_url, replace)
     creds = Credentials(_prompt_key().strip(), _prompt_secret().strip())
     if not creds.api_key or not creds.api_secret:
         raise UsageError("The API key and the API secret must not be empty")
+    _check_token(creds.api_key, "an FC API key")
+    _check_token(creds.api_secret, "an FC API secret")
 
     with FCClient(creds, base_url, profile=name, debug=out.debug if debug else None) as client:
         account = Inventory(client).account()
@@ -93,6 +103,30 @@ def add(
     if not cfg.default_profile:
         cfg.default_profile = name
     config.save(cfg)
+    return account
+
+
+@app.command("profile-add", rich_help_panel="Profile")
+def add(
+    name: NameArg,
+    base_url: Annotated[
+        str, typer.Option("--base-url", help="FC base URL (HTTPS only).")
+    ] = DEFAULT_BASE_URL,
+    replace: Annotated[
+        bool, typer.Option("--replace", help="Replace the credentials of an existing profile.")
+    ] = False,
+    json_mode: JsonOpt = False,
+    debug: DebugOpt = False,
+) -> None:
+    """Add a profile. Asks for the API key and secret at a prompt and checks them with FC."""
+    out = Output(json_mode=json_mode)
+    _precheck(name, base_url, replace)
+    if not picker.is_interactive(json_mode):
+        raise UsageError(
+            "fcm profile-add needs a terminal to read the secret",
+            hint="Run it in a terminal without --json. " + credentials.ENV_HINT,
+        )
+    account = add_profile(out, name, base_url, replace=replace, debug=debug)
 
     if json_mode:
         out.emit_json({"profile": name, "user": account.user, "teams": len(account.teams)})

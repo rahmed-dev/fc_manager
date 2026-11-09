@@ -284,3 +284,17 @@ def test_httpx_is_not_called_for_list(env, cli, monkeypatch):
     save_profile("work")
     monkeypatch.setattr(httpx.Client, "send", lambda *a, **k: pytest.fail("no network"))
     assert cli("profile-list").code == 0
+
+
+def test_secret_prompt_shows_the_typed_text(monkeypatch):
+    """release-v1 D7: the secret prompt is visible (no hide_input)."""
+    seen = {}
+
+    def prompt(text, **kwargs):
+        seen.update(kwargs, text=text)
+        return "s"
+
+    monkeypatch.setattr(profile_cli.typer, "prompt", prompt)
+    profile_cli._prompt_secret()
+    assert seen["text"] == "FC API secret"
+    assert not seen.get("hide_input")

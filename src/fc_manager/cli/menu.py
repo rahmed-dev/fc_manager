@@ -12,12 +12,17 @@ of the picked bench) before it runs. Its `site_filter` can narrow that list, wit
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.metadata import version as package_version
+from typing import Annotated
 
 import typer
 
+from fc_manager import config, credentials
 from fc_manager.cli import deploy, migrate, picker, update
+from fc_manager.cli import profile as profile_cli
 from fc_manager.cli.common import (
     ProfileOpt,
     Session,
@@ -28,8 +33,9 @@ from fc_manager.cli.common import (
 )
 from fc_manager.cli.inventory import choose_site
 from fc_manager.cli.root import app
-from fc_manager.errors import FcmError, NotFound
+from fc_manager.errors import FcmError, NotFound, UsageError
 from fc_manager.inventory import Bench, Site, Team
+from fc_manager.output import Output
 
 OTHER_BENCH, QUIT = "bench", "quit"
 
@@ -68,8 +74,57 @@ ACTIONS = [
 ]  # fmt: skip
 
 
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(f"fcm {package_version('fc-manager')}")
+        raise typer.Exit(0)
+
+
+VersionOpt = Annotated[
+    bool,
+    typer.Option(
+        "--version", callback=_show_version, is_eager=True, help="Show the version and exit."
+    ),
+]
+
+SETUP_PROFILE = "default"
+WELCOME = (
+    "Welcome to fcm. No profile is set up yet.\n"
+    "A profile holds one FC API key and secret. To make one, open the FC dashboard:\n"
+    "Settings > Profile & Team > API Access. The secret goes into the OS keyring only."
+)
+
+
+def needs_setup(profile_option: str | None) -> bool:
+    """True when nothing can give credentials: no profile picked or saved, no env vars."""
+    if profile_option or os.environ.get(credentials.ENV_PROFILE):
+        return False
+    if config.load().profiles:
+        return False
+    return credentials.env_credentials() is None
+
+
+def first_run() -> str:
+    """The first-run setup: add the first profile, as profile-add does. Returns its name."""
+    out = Output(json_mode=False)
+    if not credentials.keyring_usable():
+        raise UsageError(
+            "No profile is set up, and no secure OS keyring is available on this host",
+            hint=credentials.ENV_HINT,
+        )
+    out.message(WELCOME)
+    name = typer.prompt("Profile name", default=SETUP_PROFILE).strip()
+    try:
+        account = profile_cli.add_profile(out, name)
+    except FcmError as err:  # nothing was saved: the retry is the setup itself
+        err.hint = "Nothing was saved. Run fcm again to retry the setup."
+        raise
+    out.message(f"Profile {name} saved: user {account.user}. Opening the menu.")
+    return name
+
+
 @app.callback(invoke_without_command=True)
-def root(ctx: typer.Context, profile: ProfileOpt = None) -> None:
+def root(ctx: typer.Context, profile: ProfileOpt = None, version: VersionOpt = False) -> None:
     """Explore Frappe Cloud teams, benches and sites, and deploy app updates to a bench.
 
     Run `fcm` with no command on a terminal to open the menu: team, bench, then an action."""
@@ -79,6 +134,8 @@ def root(ctx: typer.Context, profile: ProfileOpt = None) -> None:
         typer.echo(ctx.get_help())
         raise typer.Exit(0)
     try:
+        if needs_setup(profile):
+            profile = first_run()
         run(profile)
     except picker.Cancelled:  # Ctrl+C at a menu prompt
         typer.echo("Cancelled, nothing done.")
