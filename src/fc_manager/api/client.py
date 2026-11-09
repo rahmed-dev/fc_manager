@@ -30,11 +30,16 @@ DEFAULT_BASE_URL = "https://cloud.frappe.io"
 READ_ONLY_METHODS: frozenset[str] = frozenset(
     {
         "press.api.account.get",
+        "press.api.bench.all_apps",
         "press.api.client.get",
         "press.api.bench.all",
         "press.api.bench.deploy_information",
         "press.api.bench.deploy_status",
+        "press.api.github.app",
+        "press.api.github.branches",
+        "press.api.github.options",
         "press.api.site.all",
+        "press.api.site.available_apps",
         "press.api.site.check_for_updates",
         "press.api.site.get",
         "press.api.site.installed_apps",
@@ -45,7 +50,14 @@ READ_ONLY_METHODS: frozenset[str] = frozenset(
 
 # Methods that change FC. Only `FCClient.write()` sends them, as POST, with no retry.
 WRITE_METHODS: frozenset[str] = frozenset(
-    {"press.api.bench.deploy_and_update", "press.api.site.migrate", "press.api.site.update"}
+    {
+        "press.api.bench.deploy_and_update",
+        "press.api.site.migrate",
+        "press.api.site.update",
+        "press.api.bench.add_apps",
+        "press.api.client.run_doc_method",
+        "press.api.site.install_app",
+    }
 )
 
 # What to read when FC does not confirm a write: (job kind, read command for the target).
@@ -53,10 +65,17 @@ WRITE_FOLLOW_UP: dict[str, tuple[str, str]] = {
     "press.api.bench.deploy_and_update": ("deploy", "bench-show"),
     "press.api.site.migrate": ("migrate", "site-show"),
     "press.api.site.update": ("update", "site-show"),
+    "press.api.bench.add_apps": ("add-app", "bench-show"),
+    "press.api.client.run_doc_method": ("add-app", "bench-show"),
+    "press.api.site.install_app": ("install", "site-show"),
 }
 
 # press.api.client.get reads any doctype the user may see. fcm allows it for these only.
 READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build", "Site Update"})
+
+# press.api.client.run_doc_method runs any dashboard method of a document. fcm allows only
+# these (doctype, method) pairs: adding a GitHub app to a bench group.
+WRITE_DOC_METHODS: frozenset[tuple[str, str]] = frozenset({("Release Group", "add_app")})
 
 
 def check_read_method(method: str, params: dict[str, Any]) -> None:
@@ -150,18 +169,25 @@ class FCClient:
                 self._sleep(BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)])
                 attempt += 1
 
-    def write(self, method: str, team: str, **body: Any) -> Any:
+    def write(self, fc_method: str, /, team: str, **body: Any) -> Any:
         """Send one allowlisted FC write method as POST and return its `message` payload.
 
-        A write is never retried: a second request could start a second deploy, migrate or
-        update. When FC does not confirm the request (timeout or 5xx), the result on FC is
-        not known."""
+        A write is never retried: a second request could start a second deploy, migrate,
+        update or install. When FC does not confirm the request (timeout or 5xx), the
+        result on FC is not known.
+
+        `fc_method` is positional only: the body of `run_doc_method` has its own `method`."""
+        method = fc_method
         if method not in WRITE_METHODS:
             raise MethodNotAllowed(f"FC method is not on the write allowlist: {method}")
         if not team:
             raise MethodNotAllowed(f"A write needs a team: {method}")
+        if method == "press.api.client.run_doc_method":
+            pair = (body.get("dt"), body.get("method"))
+            if pair not in WRITE_DOC_METHODS:
+                raise MethodNotAllowed(f"Document method is not on the write allowlist: {pair}")
         kind, command = WRITE_FOLLOW_UP[method]
-        target_name = body.get("name")
+        target_name = body.get("name") or body.get("dn")
         hint = f"Run: fcm {command} {target_name}" if target_name else "Check the FC dashboard."
         unknown = (
             f"FC did not confirm the {kind} request ({method}). Its result on FC is not known."

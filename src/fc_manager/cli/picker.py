@@ -7,10 +7,12 @@ interactive mode the tool never prompts; it raises a usage error with the candid
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TypeVar
 
 import questionary
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
 from fc_manager.errors import UsageError
@@ -88,12 +90,16 @@ def choose(
     back: bool = False,
     path: str | None = None,
     space_picks: bool = False,
+    disabled: Callable[[T], str | None] | None = None,
 ) -> T:
     """Show a type-to-filter list. Ctrl+C exits with code 2. With `back`, Esc raises GoBack.
     With `path`, the target path prints above the prompt. With `space_picks`, Space picks
-    the row under the pointer, as Enter does (only for lists whose labels hold no space)."""
+    the row under the pointer, as Enter does (only for lists whose labels hold no space).
+    With `disabled`, a row whose value gets a reason is shown with that reason and cannot
+    be picked. At least one row must stay pickable."""
     choices = [
-        questionary.Choice(title=label, value=index) for index, (label, _) in enumerate(options)
+        questionary.Choice(title=label, value=index, disabled=disabled(value) if disabled else None)
+        for index, (label, value) in enumerate(options)
     ]
     keys = "Enter or Space to pick" if space_picks else "Enter to pick"
     if back:
@@ -152,6 +158,66 @@ def choose_many(
     if answer is None:
         raise Cancelled("Cancelled, nothing done")
     return [options[index][1] for index in answer]
+
+
+def search(
+    prompt: str,
+    find: Callable[[str], Sequence[tuple[str, T]]],
+    *,
+    back: bool = False,
+    path: str | None = None,
+) -> T:
+    """A search prompt: as the user types, `find(text)` gives the rows to show (the caller
+    keeps it to at most 10, best first). Enter on a row picks it. Enter on typed text picks
+    the best row for that text. With `back`, Esc raises GoBack. Ctrl+C exits with code 2.
+
+    `find` runs locally on every key press, so it must not send a request."""
+    seen: dict[str, T] = {}
+
+    class _Rows(Completer):
+        def get_completions(self, document, complete_event):
+            for label, value in find(document.text):
+                seen[label] = value
+                yield Completion(label, start_position=-len(document.text))
+
+    bindings = KeyBindings()
+    if back:
+
+        @bindings.add("escape", eager=True)
+        def _back(event) -> None:
+            event.app.exit(result=_BACK)
+
+    keys = "type to search, Tab or arrows to move, Enter to pick" + (
+        ", Esc to go back" if back else ""
+    )
+    show_path(path)
+    while True:
+        question = questionary.autocomplete(
+            f"{prompt} ({keys}, Ctrl+C to cancel)",
+            choices=[],
+            completer=_Rows(),
+            style=STYLE,
+            key_bindings=bindings,
+        )
+        answer = question.ask()
+        if answer is _BACK:
+            raise GoBack
+        if answer is None:
+            raise Cancelled("Cancelled, nothing done")
+        if answer in seen:
+            return seen[answer]
+        rows = find(answer)
+        if rows:
+            return rows[0][1]
+        print("No match. Type a part of the name.")
+
+
+def ask_yes_no(prompt: str, *, default: bool = False) -> bool:
+    """Ask a yes or no question. Esc and Ctrl+C mean no."""
+    question = questionary.confirm(prompt, default=default, style=STYLE)
+    _bind_back(question)
+    answer = question.ask()
+    return answer is True
 
 
 def ask_text(prompt: str) -> str:

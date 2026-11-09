@@ -7,7 +7,15 @@ import traceback
 
 import typer
 
-from fc_manager.cli import deploy, inventory, menu, migrate, profile, update  # noqa: F401 - register commands
+from fc_manager.cli import (  # noqa: F401 - register commands
+    apps,
+    deploy,
+    inventory,
+    menu,
+    migrate,
+    profile,
+    update,
+)
 from fc_manager.cli.root import NOUNS, READ_VERBS, WRITE_VERBS, app  # noqa: F401 - public names
 from fc_manager.errors import FcmError, UsageError
 from fc_manager.output import Output

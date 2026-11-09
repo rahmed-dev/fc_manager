@@ -140,3 +140,53 @@ def test_space_is_not_bound_by_default(monkeypatch):
     seen = capture(monkeypatch, 0, name="select")
     picker.choose("Bench", [("a", 1)])
     assert "Enter to pick" in seen["instruction"] and "Space" not in seen["instruction"]
+
+
+# --- add-app 9.5: the search prompt -------------------------------------------------------
+
+
+def _fake_autocomplete(monkeypatch, typed: str, pick_row: int | None):
+    """questionary.autocomplete stand-in: type `typed`, read the completer rows, and answer
+    with row `pick_row` (or the typed text when None)."""
+    from prompt_toolkit.document import Document
+
+    from fc_manager.cli import picker
+
+    seen = {}
+
+    def autocomplete(message, *, choices, completer, style, key_bindings):
+        rows = [c.text for c in completer.get_completions(Document(typed), None)]
+        seen["rows"] = rows
+        seen["message"] = message
+
+        class _Q:
+            def ask(self):
+                return rows[pick_row] if pick_row is not None else typed
+
+        return _Q()
+
+    monkeypatch.setattr(picker.questionary, "autocomplete", autocomplete)
+    return seen
+
+
+def _find(text):
+    from fc_manager.search import SearchIndex
+
+    index = SearchIndex([f"app_{n:03}" for n in range(50)] + ["helpdesk"], key=lambda a: a)
+    return [(item, item.upper()) for item in index.search(text)]
+
+
+def test_search_prompt_shows_at_most_10_rows_and_picks_the_row(monkeypatch):
+    from fc_manager.cli import picker
+
+    seen = _fake_autocomplete(monkeypatch, "app", pick_row=2)
+    assert picker.search("Search", _find) == "APP_002"
+    assert len(seen["rows"]) == 10
+    assert "type to search" in seen["message"]
+
+
+def test_search_prompt_enter_on_text_picks_the_best_row(monkeypatch):
+    from fc_manager.cli import picker
+
+    _fake_autocomplete(monkeypatch, "hlpdsk", pick_row=None)
+    assert picker.search("Search", _find) == "HELPDESK"

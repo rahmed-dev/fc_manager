@@ -1,7 +1,8 @@
 """Root `fcm` group. Every command registers here with its full hyphenated name.
 
-Grammar: fcm <noun>-<verb> [TARGET] [options]. A space always separates the command word
-from an argument or an option. Nouns are singular. No aliases.
+Grammar: fcm <noun>-<verb> [TARGET] [options]. A write verb can carry its object
+(bench-add-app). A space always separates the command word from an argument or an option.
+Nouns are singular. No aliases.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from fc_manager.errors import UsageError
 NOUNS = ("profile", "team", "bench", "site")
 READ_VERBS = frozenset({"list", "show", "add", "remove", "test"})
 # Each write verb previews and asks for a typed confirmation.
-WRITE_VERBS = frozenset({"deploy", "migrate", "update"})
+WRITE_VERBS = frozenset({"deploy", "migrate", "update", "add-app", "install-app"})
 PLURALS = {"profiles": "profile", "teams": "team", "benches": "bench", "sites": "site"}
 PANELS = {noun: noun.capitalize() for noun in NOUNS}
 

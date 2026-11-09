@@ -32,6 +32,8 @@ COMMANDS = [
     ["bench-deploy", "bench-1234", "--all-apps", "--dry-run"],
     ["site-migrate", "erp.acme.example.com", "--dry-run"],
     ["site-update", "erp.acme.example.com", "--dry-run"],
+    ["bench-add-app", "bench-1234", "--app", "crm", "--dry-run"],
+    ["site-install-app", "erp.acme.example.com", "--app", "crm", "--dry-run"],
 ]
 
 FLAGS = [[], ["--debug"], ["--json"], ["--debug", "--json"]]
@@ -116,13 +118,26 @@ WALK = COMMANDS + [
     ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", "--no-wait"],
     ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com", "--no-wait"],
     ["site-update", "erp.acme.example.com", "--confirm", "erp.acme.example.com", "--no-wait"],
-]
+    ["bench-add-app", "bench-1234", "--app", "crm", "--confirm", "bench-1234"],
+    ["site-install-app", "erp.acme.example.com", "--app", "crm",
+     "--confirm", "erp.acme.example.com", "--no-wait"],
+    ["bench-add-app", "bench-1234", "--repo", "https://github.com/acme/tools",
+     "--branch", "main", "--confirm", "bench-1234"],
+]  # fmt: skip
 
 DEPLOY = "press.api.bench.deploy_and_update"
 MIGRATE = "press.api.site.migrate"
 UPDATE = "press.api.site.update"
+ADD_APP = "press.api.bench.add_apps"
+INSTALL = "press.api.site.install_app"
 # Each write command and the one write method it may send.
-OWN_WRITE = {"bench-deploy": DEPLOY, "site-migrate": MIGRATE, "site-update": UPDATE}
+OWN_WRITE = {
+    "bench-deploy": DEPLOY,
+    "site-migrate": MIGRATE,
+    "site-update": UPDATE,
+    "bench-add-app": ADD_APP,
+    "site-install-app": INSTALL,
+}
 
 
 def posts(fake) -> list[str]:
@@ -130,10 +145,13 @@ def posts(fake) -> list[str]:
 
 
 def expected_posts(command: list[str]) -> list[str]:
-    """The POSTs a command may send: its own write method once, or none for a dry run."""
-    if command[0] in OWN_WRITE and "--dry-run" not in command:
-        return [OWN_WRITE[command[0]]]
-    return []
+    """The POSTs a command may send: its own write method once, or none for a dry run.
+    A GitHub add (--repo) sends run_doc_method instead of add_apps."""
+    if "--dry-run" in command or command[0] not in OWN_WRITE:
+        return []
+    if command[0] == "bench-add-app" and "--repo" in command:
+        return ["press.api.client.run_doc_method"]
+    return [OWN_WRITE[command[0]]]
 
 
 def test_walk_covers_every_command():
@@ -194,6 +212,27 @@ def test_walk_detects_the_wrong_write_from_site_update(env, cli, strict_fc, monk
     assert posts(strict_fc) != expected_posts(command)
 
 
+@pytest.mark.parametrize(
+    ("command_name", "attribute", "wrong"),
+    [
+        ("bench-add-app", "ADD_METHOD", DEPLOY),
+        ("site-install-app", "INSTALL_METHOD", MIGRATE),
+    ],
+)
+def test_walk_detects_the_wrong_write_from_app_commands(
+    env, cli, strict_fc, monkeypatch, command_name, attribute, wrong
+):
+    """Guard for the guard: an app command that sent another write would fail the walk."""
+    from fc_manager import apps
+
+    save_profile("work")
+    monkeypatch.setattr(apps, attribute, wrong)
+    command = next(c for c in WALK if c[0] == command_name and "--confirm" in c)
+    cli(*command)
+    assert posts(strict_fc) == [wrong]
+    assert posts(strict_fc) != expected_posts(command)
+
+
 def test_strict_router_fails_on_a_method_off_the_allowlist(env, strict_fc):
     """Guard for the guard: the strict router itself rejects an unlisted method."""
     with pytest.raises(respx.models.AllMockedAssertionError):
@@ -216,7 +255,10 @@ WRITE_COMMANDS = [
     ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234"],
     ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com"],
     ["site-update", "erp.acme.example.com", "--confirm", "erp.acme.example.com"],
-]
+    ["bench-add-app", "bench-1234", "--app", "crm", "--confirm", "bench-1234"],
+    ["site-install-app", "erp.acme.example.com", "--app", "crm", "--confirm",
+     "erp.acme.example.com"],
+]  # fmt: skip
 
 
 @pytest.mark.parametrize("path", sorted(WRITE_ERRORS))

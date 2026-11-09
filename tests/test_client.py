@@ -476,3 +476,131 @@ def test_update_write_unknown_names_site_show(outcome):
     assert "update request" in info.value.message
     assert "not known" in info.value.message
     assert info.value.hint == "Run: fcm site-show erp.acme.example.com"
+
+
+# --- add-app 1.1: app list reads ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("method", "name"),
+    [
+        ("press.api.bench.all_apps", "bench-1234"),
+        ("press.api.site.available_apps", "erp.acme.example.com"),
+    ],
+)
+@respx.mock
+def test_app_list_reads_send_get_with_plain_name(method, name):
+    route = respx.get(method_url(method)).respond(json={"message": []})
+    make_client().call(method, team="t", name=name)
+    request = route.calls.last.request
+    assert request.method == "GET"
+    assert request.url.params["name"] == name
+    assert route.call_count == 1
+
+
+# --- add-app 2.1: the add and install writes --------------------------------------------
+
+
+@respx.mock
+def test_add_apps_write_sends_one_post():
+    route = respx.post(method_url("press.api.bench.add_apps")).respond(json={})
+    apps = [{"app": "crm", "source": "src-0001"}, {"app": "lms", "source": "src-0002"}]
+    make_client().write("press.api.bench.add_apps", team="acme", name="bench-1234", apps=apps)
+    request = route.calls.last.request
+    assert route.call_count == 1
+    assert request.method == "POST"
+    assert request.headers["X-Press-Team"] == "acme"
+    assert json.loads(request.content) == {"name": "bench-1234", "apps": apps}
+
+
+@respx.mock
+def test_run_doc_method_allows_release_group_add_app_only():
+    from fc_manager.errors import MethodNotAllowed
+
+    route = respx.post(method_url("press.api.client.run_doc_method")).respond(json={})
+    client = make_client()
+    for dt, method in [("Site", "add_app"), ("Release Group", "archive"), (None, None)]:
+        with pytest.raises(MethodNotAllowed):
+            client.write("press.api.client.run_doc_method", team="t", dt=dt, dn="x", method=method)
+    assert route.call_count == 0
+    client.write(
+        "press.api.client.run_doc_method", team="t", dt="Release Group", dn="bench-1234",
+        method="add_app", args={"app": {"name": "tools"}},
+    )  # fmt: skip
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("method", ["press.api.bench.add_app", "press.api.client.get_list"])
+def test_other_app_writes_are_refused(method):
+    from fc_manager.errors import MethodNotAllowed
+
+    with respx.mock() as router, pytest.raises(MethodNotAllowed):
+        make_client().write(method, team="t", name="bench-1234")
+    assert not router.calls
+
+
+@pytest.mark.parametrize("outcome", [httpx.Response(502), httpx.ReadTimeout("t")])
+@pytest.mark.parametrize(
+    ("method", "name", "kind", "hint"),
+    [
+        (
+            "press.api.bench.add_apps",
+            "bench-1234",
+            "add-app request",
+            "Run: fcm bench-show bench-1234",
+        ),
+        (
+            "press.api.site.install_app",
+            "erp.acme.example.com",
+            "install request",
+            "Run: fcm site-show erp.acme.example.com",
+        ),
+    ],
+)
+def test_app_writes_unknown_name_their_read_command(outcome, method, name, kind, hint):
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        route = router.post(method_url(method))
+        if isinstance(outcome, Exception):
+            route.side_effect = outcome
+        else:
+            route.return_value = outcome
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write(method, team="t", name=name, app="crm")
+        assert route.call_count == 1
+    assert kind in info.value.message
+    assert "not known" in info.value.message
+    assert info.value.hint == hint
+
+
+def test_run_doc_method_unknown_names_bench_show():
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        route = router.post(method_url("press.api.client.run_doc_method")).respond(502)
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write(
+                "press.api.client.run_doc_method", team="t", dt="Release Group",
+                dn="bench-1234", method="add_app", args={},
+            )  # fmt: skip
+        assert route.call_count == 1
+    assert info.value.hint == "Run: fcm bench-show bench-1234"
+
+
+@pytest.mark.parametrize(
+    ("method", "params"),
+    [
+        ("press.api.github.options", {}),
+        ("press.api.github.branches", {"owner": "frappe", "name": "crm"}),
+        ("press.api.github.app", {"owner": "frappe", "repository": "crm", "branch": "main"}),
+    ],
+)
+@respx.mock
+def test_github_reads_send_get(method, params):
+    route = respx.get(method_url(method)).respond(json={"message": {}})
+    make_client().call(method, team="t", **params)
+    request = route.calls.last.request
+    assert request.method == "GET"
+    for key, value in params.items():
+        assert request.url.params[key] == value

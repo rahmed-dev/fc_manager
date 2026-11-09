@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from fc_manager.api.client import FCClient
-from fc_manager.errors import MigrateFailed, MigrateUnknown, UsageError
+from fc_manager.errors import FcmError, MigrateFailed, MigrateUnknown, UsageError
 from fc_manager.inventory import Site
 from fc_manager.redact import redact
 
@@ -202,49 +202,82 @@ class MigrateService:
 
         Raises MigrateUnknown when no migrate job shows up in FIND_LIMIT_SECONDS, and
         MigrateFailed when the job fails."""
-        site = plan.site
-        polls = 0
+        return watch_site_job(
+            self,
+            plan.site,
+            job_type=JOB_TYPE,
+            word="migrate",
+            unknown=MigrateUnknown,
+            failed=MigrateFailed,
+            sleep=sleep,
+            poll_seconds=poll_seconds,
+            clock=clock,
+        )
 
-        def answered(state: MigrateState) -> MigrateState:
-            nonlocal polls
-            polls += 1
-            return replace(state, checked_at=clock(), polls=polls)
 
-        started = clock()
-        job = ""
-        while not job:
-            found = [j for j in self.running_jobs(site) if j.job_type == JOB_TYPE]
-            if found:
-                job = found[0].name
-                break
-            if clock() - started >= FIND_LIMIT_SECONDS:
-                status = self.site_status(site)
-                raise MigrateUnknown(
-                    f"FC accepted the migrate, but fcm did not see a migrate job for site "
-                    f"{site.name}. The result is not known.",
-                    target=f"site {site.name}",
-                    hint=f"Site status on FC: {status or 'unknown'}. "
-                    f"Run: fcm site-show {site.name}",
-                )
-            yield answered(MigrateState(stage="finding"))
-            sleep(poll_seconds)
+def watch_site_job(
+    service: MigrateService,
+    site: Site,
+    *,
+    job_type: str,
+    word: str,
+    unknown: type[FcmError],
+    failed: type[FcmError],
+    sleep: Callable[[float], None],
+    poll_seconds: float = POLL_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[MigrateState]:
+    """Find the new `job_type` job of `site` in its running jobs, then follow it until it
+    ends. Shared by the migrate and the install watch. `word` names the action in the
+    messages ("migrate", "install").
 
-        while True:
-            state = self.job(site, job)
-            if state.status in JOB_DONE:
-                break
-            yield answered(state)
-            sleep(poll_seconds)
+    Raises `unknown` when no such job shows up in FIND_LIMIT_SECONDS, and `failed` (with
+    the failed step) when the job fails."""
+    polls = 0
 
-        final = replace(state, site_status=self.site_status(site))
-        yield answered(final)
-        if final.stage == "failure":
-            step = final.failed_step
-            raise MigrateFailed(
-                f"The migrate failed on FC at {step.label if step else 'the migrate job'}",
-                step=step.label if step else None,
+    def answered(state: MigrateState) -> MigrateState:
+        nonlocal polls
+        polls += 1
+        return replace(state, checked_at=clock(), polls=polls)
+
+    started = clock()
+    job = ""
+    while not job:
+        found = [j for j in service.running_jobs(site) if j.job_type == job_type]
+        if found:
+            job = found[0].name
+            break
+        if clock() - started >= FIND_LIMIT_SECONDS:
+            status = service.site_status(site)
+            raise unknown(
+                f"FC accepted the {word}, but fcm did not see {_article(word)} {word} job for "
+                f"site {site.name}. The result is not known.",
                 target=f"site {site.name}",
-                server_message=(step.output if step else "") or None,
-                hint=f"Site status on FC: {final.site_status or 'unknown'}. "
-                f"Run: fcm site-show {site.name}",
+                hint=f"Site status on FC: {status or 'unknown'}. Run: fcm site-show {site.name}",
             )
+        yield answered(MigrateState(stage="finding"))
+        sleep(poll_seconds)
+
+    while True:
+        state = service.job(site, job)
+        if state.status in JOB_DONE:
+            break
+        yield answered(state)
+        sleep(poll_seconds)
+
+    final = replace(state, site_status=service.site_status(site))
+    yield answered(final)
+    if final.stage == "failure":
+        step = final.failed_step
+        raise failed(
+            f"The {word} failed on FC at {step.label if step else f'the {word} job'}",
+            step=step.label if step else None,
+            target=f"site {site.name}",
+            server_message=(step.output if step else "") or None,
+            hint=f"Site status on FC: {final.site_status or 'unknown'}. "
+            f"Run: fcm site-show {site.name}",
+        )
+
+
+def _article(word: str) -> str:
+    return "an" if word[:1] in "aeiou" else "a"

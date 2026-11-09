@@ -1,0 +1,21 @@
+{
+  "message": {
+    "name": "job-7",
+    "job_type": "Install App on Site",
+    "creation": "2026-11-09 12:00:00.000000",
+    "status": "Running",
+    "start": "2026-11-09 12:00:03.000000",
+    "end": null,
+    "duration": null,
+    "steps": [
+      {
+        "step_name": "Install App on Site",
+        "status": "Running",
+        "start": "2026-11-09 12:00:03.000000",
+        "end": null,
+        "duration": null,
+        "output": ""
+      }
+    ]
+  }
+}

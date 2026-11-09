@@ -1,6 +1,7 @@
 """release-v1 group 1 and 2: first-run setup in the menu entry, and `fcm --version`."""
 
 import json
+from importlib.metadata import version as package_version
 
 import httpx
 import pytest
@@ -113,7 +114,7 @@ def test_version_prints_and_reads_nothing(env, cli, monkeypatch):
     monkeypatch.setattr(httpx.Client, "send", lambda *a, **k: pytest.fail("FC request"))
     result = cli("--version")
     assert result.code == 0
-    assert result.out.strip() == "fcm 1.0.0"
+    assert result.out.strip() == f"fcm {package_version('fc-manager')}"
 
 
 @respx.mock

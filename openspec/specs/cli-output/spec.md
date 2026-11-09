@@ -7,11 +7,15 @@ Defines the shape of every `fcm` command and what the user sees from it: one com
 ## Requirements
 
 ### Requirement: Noun-verb command grammar
-Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one command word that joins the noun and the verb with a hyphen. A space SHALL always separate the command word from an argument or an option. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural, two-word, or alias forms of a command.
+Every command SHALL have the form `fcm <noun>-<verb> [TARGET] [options]`: one command word that joins the noun and the verb with a hyphen. A write verb MAY carry its object, as in `add-app`. A space SHALL always separate the command word from an argument or an option. The noun SHALL be a singular resource type: `profile`, `team`, `bench`, or `site`. The system SHALL NOT provide plural, two-word, or alias forms of a command.
 
 #### Scenario: Singular noun
 - **WHEN** the user runs `fcm site-list`
 - **THEN** the system lists sites
+
+#### Scenario: Verb with its object
+- **WHEN** the user runs `fcm bench-add-app bench-1234`
+- **THEN** the system runs the add-app command for bench `bench-1234`
 
 ### Requirement: Wrong command form names the right command
 When the user gives a plural noun or the old two-word form, the system SHALL exit with code 2, send no request to FC, and name the hyphenated command.
@@ -29,10 +33,10 @@ The help SHALL list all commands in one list, grouped by noun.
 
 #### Scenario: Help grouped by noun
 - **WHEN** the user runs `fcm --help`
-- **THEN** the help lists `profile-add`, `profile-list`, `profile-test`, `profile-remove`, `team-list`, `bench-list`, `bench-show`, `bench-deploy`, `site-list`, `site-show`, `site-migrate`, and `site-update`, in groups for Profile, Team, Bench, and Site
+- **THEN** the help lists `profile-add`, `profile-list`, `profile-test`, `profile-remove`, `team-list`, `bench-list`, `bench-show`, `bench-deploy`, `bench-add-app`, `site-list`, `site-show`, `site-migrate`, `site-update`, and `site-install-app`, in groups for Profile, Team, Bench, and Site
 
 ### Requirement: Fixed verb set
-The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The system SHALL use only the verbs `deploy`, `migrate` and `update` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
+The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The write verbs are set in "Write verb set".
 
 #### Scenario: Detail of one item
 - **WHEN** the user wants the details of one site
@@ -49,6 +53,21 @@ The system SHALL use only these verbs for commands that do not change FC: `list`
 #### Scenario: Update verb
 - **WHEN** the user wants to move a site to the newest bench of its bench group
 - **THEN** the command is `fcm site-update <site>`, and it shows a preview and asks for a typed confirmation before it changes FC
+
+#### Scenario: Add-app verb
+- **WHEN** the user wants to add a marketplace app to a bench group
+- **THEN** the command is `fcm bench-add-app <bench>`, and it shows a preview and asks for a typed confirmation before it changes FC
+
+#### Scenario: Install-app verb
+- **WHEN** the user wants to install an app on a site
+- **THEN** the command is `fcm site-install-app <site>`, and it shows a preview and asks for a typed confirmation before it changes FC
+
+### Requirement: Write verb set
+The system SHALL use only the verbs `deploy`, `migrate`, `update`, `add-app` and `install-app` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
+
+#### Scenario: Write verb not in the set
+- **WHEN** a command changes FC
+- **THEN** its verb is one of `deploy`, `migrate`, `update`, `add-app` or `install-app`, and it previews and asks for a typed confirmation before its first write request
 
 ### Requirement: Positional target
 When a command acts on one item, the item SHALL be the one positional argument, and it SHALL identify an item of the command's noun. A command SHALL NOT take its main target as an option. The positional argument MAY be left out only where the interactive picker applies.
@@ -144,6 +163,10 @@ The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage o
 
 #### Scenario: Update failed on FC
 - **WHEN** FC accepts a site update and the update then fails, also when FC restores the site to the old bench
+- **THEN** the exit code is 8
+
+#### Scenario: Install failed on FC
+- **WHEN** FC accepts an install and the install job then fails
 - **THEN** the exit code is 8
 
 ### Requirement: Debug output

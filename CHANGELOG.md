@@ -4,6 +4,26 @@ All notable changes to `fcm` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-11-09
+
+### Added
+
+- `bench-add-app`: add apps to a bench group, with a preview and a typed bench title.
+  From the marketplace: a local ranked search (at most 10 matches) and several apps in one
+  request. From GitHub: a repository of the team's installations or a public URL, then a
+  branch; one app per run. The apps reach the benches at the next deploy. In the menu,
+  "Add an app" then asks "Deploy now?".
+- `site-install-app`: install an app of the bench on one site, with a preview, a typed site
+  name, and a live watch of the install job. Apps with marketplace plans are refused: install
+  them from the FC dashboard.
+- Search prompts: the marketplace and branch steps show at most 10 ranked matches as you
+  type. The search runs locally and sends nothing to FC.
+
+### Known gaps
+
+- The first real install and the first real add through the menu are not checked yet. The
+  step names of the FC install job come from the press source and are not confirmed.
+
 ## [1.0.0] - 2026-11-09
 
 First public release.

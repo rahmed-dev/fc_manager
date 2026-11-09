@@ -1,13 +1,13 @@
 # fc_manager
 
 `fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
-all the teams that your FC login can reach, to deploy app updates to a bench, and to
-migrate or update a site.
+all the teams that your FC login can reach, to deploy app updates to a bench, to add an
+app, and to migrate, update or install an app on a site.
 
-Three commands change FC: `fcm bench-deploy`, `fcm site-migrate` and `fcm site-update`.
-Each one shows a
-preview of the target and the change, and starts nothing until you type the bench title or
-the site name. Every other command is read-only.
+Five commands change FC: `fcm bench-deploy`, `fcm bench-add-app`, `fcm site-migrate`,
+`fcm site-update` and `fcm site-install-app`. Each one shows a preview of the target and
+the change, and starts nothing until you type the bench title or the site name. Every other
+command is read-only.
 
 ## Install
 
@@ -15,12 +15,12 @@ You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you 
 system has none.
 
 ```bash
-uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.0.0
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.1.0
 ```
 
 uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
 (`~/.local/bin`). If you use pipx instead, run
-`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.0.0`.
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.1.0`.
 
 ### First run
 
@@ -71,8 +71,10 @@ work > ACME Corp > ACME Prod (bench-1234)
 ? Action (type to filter, Enter to pick, Esc to go back, Ctrl+C to cancel)
  » Show bench (bench-show)
    Deploy app updates (bench-deploy)
+   Add an app (bench-add-app)
    Migrate a site (site-migrate)
    Update a site (site-update)
+   Install an app (site-install-app)
    Pick another bench
    Quit
 ```
@@ -84,14 +86,17 @@ after a site pick. It always shows what the next action works on.
 
 1. **Team**: pick a team. `fcm` skips this step when your login reaches one team only.
 2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
-3. **Action**: show the bench, deploy app updates, migrate a site, update a site, pick
-   another bench, or quit. Each entry names its direct command.
+3. **Action**: show the bench, deploy app updates, add an app, migrate a site, update a
+   site, install an app on a site, pick another bench, or quit. Each entry names its direct
+   command.
 4. **Site** (site actions only): pick a site of that bench, shown with its status.
    "Update a site" lists only the sites that have an update. When only one site is left,
    `fcm` picks it with no list and prints its name.
 
-Each action runs the same code as its direct command. A deploy, a migrate or an update
-shows the same preview and asks for the same typed confirmation. When an action ends, also
+Each action runs the same code as its direct command. Each write action shows the same
+preview and asks for the same typed confirmation. After "Add an app", `fcm` asks
+"Deploy now?" (default No). A yes opens the deploy action of the same bench, with its own
+preview and typed bench title. When an action ends, also
 with an error or a cancelled confirmation, the action menu of the same bench opens again.
 
 ### Picker keys
@@ -153,7 +158,8 @@ On a terminal, `fcm` alone opens [the menu](#the-menu). Every menu action is als
 command, for scripts and one-liners.
 
 Every command is one word, `fcm <noun>-<verb> [TARGET] [options]`, as in Frappe `bench
-new-site`. A space always separates the command from an argument or an option. Nouns are
+new-site`. A write verb can carry its object, as in `bench-add-app` (Frappe: `bench
+get-app`) and `site-install-app` (Frappe: `bench install-app`). A space always separates the command from an argument or an option. Nouns are
 singular (`profile`, `team`, `bench`, `site`). There are no aliases: `fcm sites` and an old
 two-word form (`site list`) tell you to use `fcm site-list`, and send nothing to FC.
 `fcm --help` lists the commands in groups: Profile, Team, Bench, Site.
@@ -171,6 +177,8 @@ fcm bench-show "ACME Prod"                     # apps with updates, sites, a run
 fcm bench-deploy "ACME Prod"                   # deploy app updates (see below)
 fcm site-migrate erp.acme.com                  # run bench migrate on one site (see below)
 fcm site-update erp.acme.com                   # move a site to the newest bench (see below)
+fcm bench-add-app "ACME Prod"                  # add a marketplace app to a bench (see below)
+fcm site-install-app erp.acme.com              # install an app of the bench (see below)
 ```
 
 Options that work on every command:
@@ -307,6 +315,76 @@ continue past a failing patch; the preview warns about it, and the menu never tu
 When FC does not confirm the request, or confirms it without the name of the update
 record, `fcm` says that the update state is not known (exit 6).
 
+### Add an app to a bench
+
+`fcm bench-add-app` adds apps to a bench group. FC only records the apps in the bench
+group. They reach the benches at the next deploy, so run `fcm bench-deploy` after it. On a
+terminal:
+
+1. **Bench.** Give the bench by name or title, or pick team, then bench.
+2. **Source.** "From the marketplace (search)" or "From GitHub".
+3. **Marketplace.** Type a part of the app name or title. The prompt shows at most 10
+   matches, best first: the exact app name, then names that start with your text, then
+   words that start with it, then text inside, then the letters in order (`hlpdsk` finds
+   `helpdesk`). Only apps with a release for the Frappe version of the bench are offered.
+   After each pick, answer "Add another app?". All picked apps go to FC in one request.
+   When an app has more than one release source (branch), pick one.
+4. **GitHub.** Pick a repository of your team's FC GitHub installations, or paste a public
+   URL (`https://github.com/<owner>/<repo>`). Then search the branches; Enter with no text
+   takes the default branch. FC reads the app name and its Frappe version range from the
+   branch. One GitHub app per run.
+5. **Preview.** The profile, the team and its owner, the bench and its Frappe version, and
+   each app with its branch and repository.
+6. **Confirm.** Type the bench title exactly. Any other input cancels, and nothing is sent.
+7. **Result.** "FC added ..." and the hint `fcm bench-deploy <bench>` (exit 0). FC starts no
+   job for an add, so there is nothing to watch. In the menu, `fcm` then asks
+   "Deploy now?".
+
+`fcm` reads the marketplace list (about 400 apps) once per bench and session, and searches
+it locally: FC has no marketplace search that `fcm` can call. Typing sends nothing to FC.
+
+```bash
+fcm bench-add-app "ACME Prod" --app crm --dry-run                  # preview only
+fcm bench-add-app bench-1234 --app crm --app lms --confirm bench-1234
+fcm bench-add-app bench-1234 --app lms --source lms=src-0002 --confirm bench-1234
+fcm bench-add-app bench-1234 --repo https://github.com/acme/tools --branch main \
+    --confirm bench-1234
+```
+
+Without a terminal, you must give the bench, `--app` (repeat for more) or `--repo` with
+`--branch`, and `--confirm` with the bench FC name. When an app has more than one source,
+`--source <app>=<source>` is also needed; the error lists the sources. To connect a new
+GitHub account, use the FC dashboard.
+
+### Install an app on a site
+
+`fcm site-install-app` installs one app on one site. The app must already be on the bench
+of the site (add it with `fcm bench-add-app` and deploy first). On a terminal:
+
+1. **Site.** Give the site name, or pick team, then bench, then site.
+2. **Checks.** `fcm` stops, and sends nothing, when the site status is not Active, or when
+   the site has an FC job in progress.
+3. **App.** Pick an app from the apps of the bench that the site does not have. An app with
+   marketplace plans is shown as "has plans: install it from the FC dashboard", and you
+   cannot pick it. `fcm` never chooses or buys a plan.
+4. **Preview.** The profile, the team and its owner, the bench, the site and its status,
+   and the app with its branch.
+5. **Confirm.** Type the site name exactly. Any other input cancels, and nothing is sent.
+6. **Progress.** `fcm` follows the FC job "Install App on Site" until it ends. Ctrl+C stops
+   the watch only: the install continues on FC.
+7. **Result.** "the app is installed on the site" (exit 0). A failed install names the
+   failed step and exits with code 8.
+
+```bash
+fcm site-install-app erp.acme.com --app crm --dry-run                       # preview only
+fcm site-install-app erp.acme.com --app crm --confirm erp.acme.com          # in a script
+fcm site-install-app erp.acme.com --app crm --confirm erp.acme.com --no-wait --json
+```
+
+Without a terminal, you must give the site, `--app`, and `--confirm` with the site name.
+When no new install job shows up within 2 minutes after FC accepts the request, `fcm` says
+that the result is not known (exit 6).
+
 ### Exit codes
 
 | Code | Meaning |
@@ -317,9 +395,9 @@ record, `fcm` says that the update state is not known (exit 6).
 | 3 | Authentication error (FC rejected the key) |
 | 4 | Permission error |
 | 5 | Not found |
-| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, a migrate job not found in 2 minutes, or an update with no record name) |
+| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, a migrate or install job not found in 2 minutes, or an update with no record name) |
 | 7 | Partial failure across teams |
-| 8 | FC accepted a deploy, a migrate or a site update, but it failed on FC (a failed build step, migrate step or update, also when FC restored the site to the old bench) |
+| 8 | FC accepted a deploy, a migrate, a site update or an app install, but it failed on FC (a failed build step, migrate step, update or install step, also when FC restored the site to the old bench) |
 
 ## Credentials and security
 
@@ -345,16 +423,19 @@ record, `fcm` says that the update state is not known (exit 6).
   output, errors and `--debug` output.
 - **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
 - **Allowlists.** The HTTP client has a fixed allowlist of read-only FC API methods (GET)
-  and a separate write allowlist with 3 methods (POST): `press.api.bench.deploy_and_update`,
-  used only by `fcm bench-deploy`, `press.api.site.migrate`, used only by
-  `fcm site-migrate`, and `press.api.site.update`, used only by `fcm site-update`. A call to
+  and a separate write allowlist with 6 methods (POST): `press.api.bench.deploy_and_update`,
+  used only by `fcm bench-deploy`; `press.api.bench.add_apps` and
+  `press.api.client.run_doc_method` (only for the bench group method `add_app`), used only
+  by `fcm bench-add-app`; `press.api.site.migrate`, used only by `fcm site-migrate`;
+  `press.api.site.update`, used only by `fcm site-update`; and `press.api.site.install_app`,
+  used only by `fcm site-install-app`. A call to
   any other method fails inside `fcm` before any request goes out. The generic FC document
   read (`press.api.client.get`) is allowed for 2 doctypes only: the deploy build and the
   site update record. The generic FC list read (`press.api.client.get_list`) is not allowed.
-- **No retry of a write.** A deploy, migrate or update request is sent one time only. When FC does
-  not confirm it (a timeout or a server error), `fcm` says that the result on FC is not
-  known and tells you to run `fcm bench-show` or `fcm site-show`. A retry could start a
-  second deploy, migrate or update.
+- **No retry of a write.** A deploy, add-app, migrate, update or install request is sent
+  one time only. When FC does not confirm it (a timeout or a server error), `fcm` says that
+  the result on FC is not known and tells you to run `fcm bench-show` or `fcm site-show`. A retry could start a
+  second deploy, migrate, update or install.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
 

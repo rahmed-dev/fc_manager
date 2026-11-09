@@ -1,7 +1,8 @@
 """`fcm` with no command: the menu walk (team, then bench, then an action for that bench).
 
 The menu only routes. Each action runs the same work function as its direct command
-(`show_bench`, `deploy_bench`, `migrate_site`, `update_site`), so the FC requests, the
+(`show_bench`, `deploy_bench`, `add_app_to_bench`, `migrate_site`, `update_site`,
+`install_app_on_site`), so the FC requests, the
 preview and the typed confirmation are the same code. Every prompt shows the target path:
 profile > team > bench, and > site after the site step of a site action.
 
@@ -21,7 +22,7 @@ from typing import Annotated
 import typer
 
 from fc_manager import config, credentials
-from fc_manager.cli import deploy, migrate, picker, update
+from fc_manager.cli import apps, deploy, migrate, picker, update
 from fc_manager.cli import profile as profile_cli
 from fc_manager.cli.common import (
     ProfileOpt,
@@ -58,12 +59,22 @@ class Action:
         return f"{self.label} ({self.command})"
 
 
+def _add_app(s: Session, bench: Bench, site: Site | None, path: str) -> None:
+    """Add an app, then offer the deploy that brings it to the benches. The question
+    sends nothing; a yes runs the deploy action with its own preview and confirmation."""
+    if not apps.add_app_to_bench(s, bench, apps.AddAppOptions(), in_menu=True, path=path):
+        return
+    if picker.ask_yes_no("Deploy now?", default=False):
+        deploy.deploy_bench(s, bench, deploy.DeployOptions(), in_menu=True, path=path)
+
+
 ACTIONS = [
     Action("show", "Show bench", "bench-show", "bench",
            lambda s, bench, site, path: deploy.show_bench(s, bench)),
     Action("deploy", "Deploy app updates", "bench-deploy", "bench",
            lambda s, bench, site, path: deploy.deploy_bench(
                s, bench, deploy.DeployOptions(), in_menu=True, path=path)),
+    Action("add-app", "Add an app", "bench-add-app", "bench", _add_app),
     Action("migrate", "Migrate a site", "site-migrate", "site",
            lambda s, bench, site, path: migrate.migrate_site(
                s, site, migrate.MigrateOptions(), in_menu=True, path=path)),
@@ -71,6 +82,9 @@ ACTIONS = [
            lambda s, bench, site, path: update.update_site(
                s, site, update.UpdateOptions(), in_menu=True, path=path),
            site_filter=update.has_update, site_empty=update.EMPTY_SITE_STEP),
+    Action("install-app", "Install an app", "site-install-app", "site",
+           lambda s, bench, site, path: apps.install_app_on_site(
+               s, site, apps.InstallAppOptions(), in_menu=True, path=path)),
 ]  # fmt: skip
 
 

@@ -1,0 +1,8 @@
+{
+  "message": [
+    {"name": "develop", "commit": {"sha": "sha-1", "url": "https://api.github.com/x"}, "protected": false},
+    {"name": "feature-x", "commit": {"sha": "sha-2", "url": "https://api.github.com/x"}, "protected": false},
+    {"name": "main", "commit": {"sha": "sha-3", "url": "https://api.github.com/x"}, "protected": true},
+    {"name": "version-15", "commit": {"sha": "sha-4", "url": "https://api.github.com/x"}, "protected": true}
+  ]
+}

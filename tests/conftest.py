@@ -177,6 +177,33 @@ class FakeFC:
     update_records: list = field(default_factory=list)
     update_posts: list = field(default_factory=list)
     update_answer: object = "su-new"
+    # add-app and install: all_apps rows (bench group), available_apps rows (site), and the
+    # POST bodies. An install POST adds the Pending job "job-new" of type Install App on
+    # Site (unless install_makes_job is False).
+    market_apps: list = field(
+        default_factory=lambda: [
+            {"app": "crm", "title": "Frappe CRM",
+             "sources": [{"name": "src-crm", "branch": "main", "repository": "crm",
+                          "repository_owner": "frappe"}]},
+            {"app": "lms", "title": "Frappe LMS",
+             "sources": [{"name": "src-lms-1", "branch": "main", "repository": "lms",
+                          "repository_owner": "frappe"},
+                         {"name": "src-lms-2", "branch": "develop", "repository": "lms",
+                          "repository_owner": "frappe"}]},
+            {"app": "old", "title": "Old App", "sources": []},
+        ]
+    )  # fmt: skip
+    site_apps: list = field(
+        default_factory=lambda: [
+            {"name": "src-crm", "app": "crm", "title": "Frappe CRM", "branch": "main",
+             "repository_owner": "frappe", "repository_url": "https://github.com/frappe/crm"},
+            {"name": "src-hd", "app": "helpdesk", "title": "Helpdesk", "branch": "main",
+             "has_plans_available": True, "plans": [{"name": "hd-pro"}]},
+        ]
+    )  # fmt: skip
+    add_posts: list = field(default_factory=list)
+    install_posts: list = field(default_factory=list)
+    install_makes_job: bool = True
 
     @staticmethod
     def _next(seq: list, default):
@@ -228,6 +255,36 @@ class FakeFC:
                 status, body = self.post_error
                 return httpx.Response(status, json=body)
             return httpx.Response(200, json={"message": self.update_answer})
+        if method in ("press.api.bench.add_apps", "press.api.client.run_doc_method"):
+            self.add_posts.append(json.loads(request.content))
+            if self.post_error:
+                status, body = self.post_error
+                return httpx.Response(status, json=body)
+            return httpx.Response(200, json={"message": None})
+        if method == "press.api.site.install_app":
+            self.install_posts.append(json.loads(request.content))
+            if self.post_error:
+                status, body = self.post_error
+                return httpx.Response(status, json=body)
+            if self.install_makes_job:
+                self.migrate_jobs.insert(
+                    0, {"name": "job-new", "job_type": "Install App on Site", "status": "Pending"}
+                )
+            return httpx.Response(200, json={"message": None})
+        if method == "press.api.github.options":
+            return httpx.Response(200, json=fixture("github_options.json"))
+        if method == "press.api.github.branches":
+            return httpx.Response(200, json=fixture("github_branches.json"))
+        if method == "press.api.github.app":
+            repo = request.url.params["repository"]
+            return httpx.Response(
+                200,
+                json={"message": {"name": repo, "title": repo.title(), "frappe_version": ">=15"}},
+            )
+        if method == "press.api.bench.all_apps":
+            return httpx.Response(200, json={"message": self.market_apps})
+        if method == "press.api.site.available_apps":
+            return httpx.Response(200, json={"message": self.site_apps})
         if method == "press.api.site.check_for_updates":
             name = request.url.params["name"]
             if name in self.update_infos:

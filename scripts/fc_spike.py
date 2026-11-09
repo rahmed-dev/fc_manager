@@ -18,6 +18,11 @@ It answers three questions:
      The spike never calls a migrate (write) method.
   5. What does site.check_for_updates return for a site that has an update?
      The spike never calls an update (write) method.
+  6. What do the app list reads return (bench.all_apps for one bench group, and
+     site.available_apps for one Active site)?
+     The spike never calls an add-app or install (write) method.
+  7. What do the GitHub reads return (github.options for one team, and github.branches and
+     github.app for the public repo frappe/crm)? Only counts and key names are printed.
 
 Review every fixture before you commit it. The anonymizer replaces names, titles, emails,
 IP addresses and host names, but you are the last check.
@@ -246,6 +251,55 @@ def slim_updates(data: Any) -> Any:
     return data
 
 
+def slim_market_apps(data: Any) -> Any:
+    """all_apps rows: keep 20, drop the long fields. Marketplace app names are public."""
+    rows = data.get("message") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return data
+    keep = []
+    for row in rows[:20]:
+        if isinstance(row, dict):
+            row = {k: v for k, v in row.items() if k not in ("image", "description")}
+            if isinstance(row.get("sources"), list):
+                row["sources"] = row["sources"][:3]
+        keep.append(row)
+    return {**data, "message": keep}
+
+
+def slim_site_apps(data: Any) -> Any:
+    """available_apps rows: replace private app names, keep at most 2 plans per app."""
+    rows = data.get("message") if isinstance(data, dict) else None
+    for n, row in enumerate(rows or [], start=1):
+        if not isinstance(row, dict):
+            continue
+        public = str(row.get("repository_owner")) in PUBLIC_OWNERS
+        if not public and str(row.get("app")) not in PUBLIC_APPS:
+            row["app"] = f"app-{n}"
+        if isinstance(row.get("plans"), list):
+            row["plans"] = row["plans"][:2]
+    return trim_lists(data, 20)
+
+
+def describe_rows(label: str, response: httpx.Response) -> None:
+    rows = (body(response) or {}).get("message")
+    if not isinstance(rows, list):
+        print(f"  {label} -> HTTP {response.status_code}, message is {type(rows).__name__}")
+        return
+    first = rows[0] if rows and isinstance(rows[0], dict) else {}
+    print(
+        f"  {label} -> HTTP {response.status_code}, rows: {len(rows)}, "
+        f"bytes: {len(response.content)}, keys: {sorted(first)}"
+    )
+    if first.get("sources") is not None:
+        compatible = sum(1 for r in rows if isinstance(r, dict) and r.get("sources"))
+        print(f"    with a source for the group version: {compatible}")
+        source = (first.get("sources") or [{}])[0]
+        print(f"    source keys: {sorted(source) if isinstance(source, dict) else source}")
+    if rows and "has_plans_available" in str(rows):
+        plans = sum(1 for r in rows if isinstance(r, dict) and r.get("has_plans_available"))
+        print(f"    with plans: {plans}")
+
+
 def trim(data: Any) -> Any:
     if isinstance(data, dict) and isinstance(data.get("message"), list):
         return {**data, "message": data["message"][:MAX_ROWS]}
@@ -351,6 +405,58 @@ def main() -> int:
         raw["site_check_for_updates.json"] = slim_updates(trim_lists(data, 20))
     else:
         print("  no site with update_available found; nothing read")
+
+    # Question 6: app list reads (GET only; no app is ever added or installed).
+    print("\nApp list reads:")
+    for team in teams:
+        rows = (body(spike.get("press.api.bench.all", team=team)) or {}).get("message") or []
+        if rows:
+            apps = spike.get("press.api.bench.all_apps", team=team, name=rows[0]["name"])
+            describe_rows("bench.all_apps", apps)
+            if apps.is_success:
+                raw["bench_all_apps.json"] = slim_market_apps(body(apps))
+            break
+    tries = 0  # read Active sites until one has an app to install, at most 15
+    for team in teams:
+        rows = (body(spike.get("press.api.site.all", team=team)) or {}).get("message") or []
+        active = [r for r in rows if isinstance(r, dict) and r.get("status") == "Active"]
+        for site_row in active:
+            if tries >= 15 or (raw.get("site_available_apps.json") or {}).get("message"):
+                break
+            tries += 1
+            apps = spike.get("press.api.site.available_apps", team=team, name=site_row["name"])
+            describe_rows("site.available_apps", apps)
+            if apps.is_success:
+                raw["site_available_apps.json"] = slim_site_apps(body(apps))
+
+    # Question 7: GitHub reads (GET only). Repo names can be private: print counts and keys.
+    print("\nGitHub reads:")
+    if teams:
+        opts = spike.get("press.api.github.options", team=teams[0])
+        data = (body(opts) or {}).get("message")
+        if isinstance(data, dict):
+            inst = data.get("installations") or []
+            first = inst[0] if inst and isinstance(inst[0], dict) else {}
+            repos = first.get("repos") or []
+            print(
+                f"  github.options -> HTTP {opts.status_code}, {len(opts.content)} bytes, "
+                f"authorized: {data.get('authorized')}, installations: {len(inst)}, "
+                f"keys: {sorted(first)}, repos in first: {len(repos)}, "
+                f"repo keys: {sorted(repos[0]) if repos and isinstance(repos[0], dict) else []}"
+            )
+        else:
+            print(f"  github.options -> HTTP {opts.status_code}, {redact(opts.text[:200])}")
+        branches = spike.get("press.api.github.branches", team=teams[0], owner="frappe", name="crm")
+        rows = (body(branches) or {}).get("message")
+        print(
+            f"  github.branches frappe/crm -> HTTP {branches.status_code}, "
+            f"rows: {len(rows) if isinstance(rows, list) else rows!r:.80}, "
+            f"keys: {sorted(rows[0]) if isinstance(rows, list) and rows else []}"
+        )
+        info = spike.get(
+            "press.api.github.app", team=teams[0], owner="frappe", repository="crm", branch="main"
+        )
+        print(f"  github.app frappe/crm main -> HTTP {info.status_code}, {info.text[:200]}")
 
     # Question 3: deploy read methods (GET only; no deploy is ever started).
     print("\nDeploy read methods:")

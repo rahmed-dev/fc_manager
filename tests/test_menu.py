@@ -1,5 +1,6 @@
-"""cli-hub group 3, site-migrate group 6 and site-update group 6: `fcm` with no command
-opens the menu (team, bench, action, and the site step for a site action)."""
+"""cli-hub group 3, site-migrate group 6, site-update group 6 and add-app group 5: `fcm`
+with no command opens the menu (team, bench, action, and the site step for a site
+action)."""
 
 # ruff: noqa: F811 - the dfc and tty fixtures come from test_cli_deploy
 
@@ -25,7 +26,7 @@ def menu(monkeypatch):
     script: list = []
     prompts: list = []
 
-    def choose(prompt, options, *, back=False, path=None, space_picks=False):
+    def choose(prompt, options, *, back=False, path=None, space_picks=False, disabled=None):
         prompts.append((prompt, [label for label, _ in options], path))
         answer = script.pop(0)
         if answer is BACK:
@@ -33,7 +34,7 @@ def menu(monkeypatch):
         if answer is CTRL_C:
             raise picker.Cancelled("Cancelled, nothing done")
         for _, value in options:
-            if getattr(value, "name", value) == answer:
+            if answer in (getattr(value, "name", value), getattr(value, "app", None)):
                 return value
         raise AssertionError(f"{answer!r} not offered at {prompt!r}")
 
@@ -72,8 +73,10 @@ def test_action_menu_names_the_direct_commands(dfc, cli, tty, menu):
     assert prompts[2][1] == [
         "Show bench (bench-show)",
         "Deploy app updates (bench-deploy)",
+        "Add an app (bench-add-app)",
         "Migrate a site (site-migrate)",
         "Update a site (site-update)",
+        "Install an app (site-install-app)",
         "Pick another bench",
         "Quit",
     ]
@@ -340,3 +343,128 @@ def test_ctrl_c_in_update_watch_returns_to_actions(upd, cli, tty, menu, monkeypa
     assert "The update continues on FC" in result.out
     assert names(prompts) == ["Team", "Bench", "Action", "Action"]
     assert migrate_posts(upd) == ["press.api.site.update"]
+
+
+# --- add-app group 5: "Add an app", "Deploy now?" and "Install an app" ------------------
+
+
+@pytest.fixture
+def app_menu(dfc, monkeypatch):
+    """The deploy fake FC, scripted yes/no answers, a scripted search (each search picks
+    the first row for "crm"), and no real sleeping. `asked` records the yes/no prompts;
+    "Add another app?" is always no, "Deploy now?" is answer["deploy"]."""
+    from fc_manager.cli import apps as apps_cli
+
+    monkeypatch.setattr(apps_cli.time, "sleep", lambda _s: None)
+    asked = []
+    answer = {"deploy": False}
+
+    def ask_yes_no(prompt, *, default=False):
+        asked.append((prompt, default))
+        return answer["deploy"] if prompt == "Deploy now?" else False
+
+    def search(prompt, find, *, back=False, path=None):
+        return find("crm")[0][1]
+
+    monkeypatch.setattr(picker, "ask_yes_no", ask_yes_no)
+    monkeypatch.setattr(picker, "search", search)
+    return dfc, asked, answer
+
+
+def test_app_entries_order():
+    names_ = [a.name for a in menu_cli.ACTIONS]
+    assert names_.index("add-app") == names_.index("deploy") + 1
+    assert names_.index("install-app") == names_.index("update") + 1
+    scopes = {a.name: a.scope for a in menu_cli.ACTIONS}
+    assert scopes["add-app"] == "bench" and scopes["install-app"] == "site"
+
+
+def test_add_from_menu_sends_nothing_before_the_typed_title(app_menu, cli, tty, menu):
+    fc, asked, _ = app_menu
+    script, prompts = menu
+    seen, answers = tty
+    script += ["team-acme", "bench-1234", "add-app", "market", "quit"]
+    answers["text"] = ["nope"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "Add-app preview" in result.out
+    assert seen["text"] == ["Type the bench title to add the app (ACME Prod):"]
+    assert migrate_posts(fc) == []
+    assert asked == [("Add another app?", False)]  # no "Deploy now?" after a cancelled add
+    assert names(prompts) == ["Team", "Bench", "Action", "Add an app from", "Action"]
+
+
+def test_add_then_no_deploy_returns_to_actions(app_menu, cli, tty, menu):
+    fc, asked, _ = app_menu
+    script, prompts = menu
+    _, answers = tty
+    script += ["team-acme", "bench-1234", "add-app", "market", "quit"]
+    answers["text"] = ["ACME Prod"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert migrate_posts(fc) == ["press.api.bench.add_apps"]
+    assert asked == [("Add another app?", False), ("Deploy now?", False)]
+    assert names(prompts)[-1] == "Action"
+    assert "Deploy preview" not in result.out
+
+
+def test_add_then_deploy_starts_the_deploy_walk(app_menu, cli, tty, menu):
+    fc, asked, answer = app_menu
+    answer["deploy"] = True
+    script, prompts = menu
+    seen, answers = tty
+    script += ["team-acme", "bench-1234", "add-app", "market", "quit"]
+    answers["text"] = ["ACME Prod", "nope"]  # add confirmed; deploy title wrong
+    answers["many"] = ["all", []]
+    result = cli()
+    assert result.code == 0, result.err
+    assert asked == [("Add another app?", False), ("Deploy now?", False)]
+    assert seen["many"][0]["prompt"] == "App updates to deploy"
+    assert "Deploy preview" in result.out
+    assert seen["text"][1].startswith("Type the bench title to deploy")
+    assert migrate_posts(fc) == ["press.api.bench.add_apps"]  # no deploy POST
+
+
+def test_esc_at_source_choice_returns_to_actions(app_menu, cli, tty, menu):
+    fc, _, _ = app_menu
+    script, prompts = menu
+    script += ["team-acme", "bench-1234", "add-app", BACK, "quit"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert names(prompts)[-1] == "Action"
+    assert migrate_posts(fc) == []
+
+
+def test_install_from_menu_sends_nothing_before_the_typed_name(app_menu, cli, tty, menu):
+    fc, _, _ = app_menu
+    script, prompts = menu
+    seen, answers = tty
+    script += ["team-acme", "bench-1234", "install-app", SITE, "crm", "quit"]
+    answers["text"] = ["nope"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "Install preview" in result.out
+    assert seen["text"] == [f"Type the site name to install the app ({SITE}):"]
+    assert migrate_posts(fc) == []
+    assert names(prompts) == ["Team", "Bench", "Action", "Site", f"App to install on {SITE}",
+                              "Action"]  # fmt: skip
+
+
+def test_ctrl_c_in_install_watch_returns_to_actions(app_menu, cli, tty, menu, monkeypatch):
+    from fc_manager.cli import apps as apps_cli
+
+    def interrupt(_s):
+        raise KeyboardInterrupt
+
+    fc, _, _ = app_menu
+    monkeypatch.setattr(apps_cli.time, "sleep", interrupt)
+    fc.job_docs = [{"name": "job-new", "status": "Running", "steps": []}]
+    script, prompts = menu
+    _, answers = tty
+    script += ["team-acme", "bench-1234", "install-app", SITE, "crm", "quit"]
+    answers["text"] = [SITE]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "The install continues on FC" in result.out
+    assert names(prompts)[-1] == "Action"
+    assert migrate_posts(fc) == ["press.api.site.install_app"]

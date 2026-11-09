@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 import typer
@@ -34,6 +34,7 @@ class Session:
     inventory: Inventory
     profile: credentials.ActiveProfile
     interactive: bool
+    cache: dict = field(default_factory=dict)  # per-session reads, such as app lists
 
 
 @contextmanager

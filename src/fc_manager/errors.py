@@ -167,3 +167,20 @@ class UpdateUnknown(FcmError):
     not known (exit 6)."""
 
     kind = ErrorKind.SERVER
+
+
+class InstallFailed(FcmError):
+    """FC accepted an app install, and the install job then failed on FC (exit 8)."""
+
+    kind = ErrorKind.JOB_FAILED
+
+    def __init__(self, message: str, *, step: str | None = None, **kwargs) -> None:
+        super().__init__(message, **kwargs)
+        self.step = step
+
+
+class InstallUnknown(FcmError):
+    """FC accepted an app install, but fcm cannot find its job. The result is not known
+    (exit 6)."""
+
+    kind = ErrorKind.SERVER
