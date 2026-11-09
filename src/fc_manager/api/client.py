@@ -35,6 +35,7 @@ READ_ONLY_METHODS: frozenset[str] = frozenset(
         "press.api.bench.deploy_information",
         "press.api.bench.deploy_status",
         "press.api.site.all",
+        "press.api.site.check_for_updates",
         "press.api.site.get",
         "press.api.site.installed_apps",
         "press.api.site.running_jobs",
@@ -44,17 +45,18 @@ READ_ONLY_METHODS: frozenset[str] = frozenset(
 
 # Methods that change FC. Only `FCClient.write()` sends them, as POST, with no retry.
 WRITE_METHODS: frozenset[str] = frozenset(
-    {"press.api.bench.deploy_and_update", "press.api.site.migrate"}
+    {"press.api.bench.deploy_and_update", "press.api.site.migrate", "press.api.site.update"}
 )
 
 # What to read when FC does not confirm a write: (job kind, read command for the target).
 WRITE_FOLLOW_UP: dict[str, tuple[str, str]] = {
     "press.api.bench.deploy_and_update": ("deploy", "bench-show"),
     "press.api.site.migrate": ("migrate", "site-show"),
+    "press.api.site.update": ("update", "site-show"),
 }
 
 # press.api.client.get reads any doctype the user may see. fcm allows it for these only.
-READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build"})
+READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build", "Site Update"})
 
 
 def check_read_method(method: str, params: dict[str, Any]) -> None:
@@ -151,8 +153,9 @@ class FCClient:
     def write(self, method: str, team: str, **body: Any) -> Any:
         """Send one allowlisted FC write method as POST and return its `message` payload.
 
-        A write is never retried: a second request could start a second deploy or migrate. When FC
-        does not confirm the request (timeout or 5xx), the result on FC is not known."""
+        A write is never retried: a second request could start a second deploy, migrate or
+        update. When FC does not confirm the request (timeout or 5xx), the result on FC is
+        not known."""
         if method not in WRITE_METHODS:
             raise MethodNotAllowed(f"FC method is not on the write allowlist: {method}")
         if not team:

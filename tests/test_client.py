@@ -413,3 +413,66 @@ def test_deploy_write_unknown_says_deploy():
             make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
     assert "deploy request" in info.value.message
     assert info.value.hint == "Run: fcm bench-show bench-1"
+
+
+# --- site-update 1.1: site update reads -------------------------------------------------
+
+
+@respx.mock
+def test_check_for_updates_sends_get_with_plain_name():
+    route = respx.get(method_url("press.api.site.check_for_updates")).respond(
+        json={"message": {"update_available": False}}
+    )
+    make_client().call("press.api.site.check_for_updates", team="t", name="erp.acme.example.com")
+    request = route.calls.last.request
+    assert request.method == "GET"
+    assert request.url.params["name"] == "erp.acme.example.com"
+
+
+@respx.mock
+def test_client_get_allows_site_update_record():
+    route = respx.get(method_url("press.api.client.get")).respond(json={"message": {}})
+    make_client().call("press.api.client.get", team="t", doctype="Site Update", name="su-0001")
+    request = route.calls.last.request
+    assert request.method == "GET"
+    assert request.url.params["doctype"] == "Site Update"
+    assert request.url.params["name"] == "su-0001"
+
+
+# --- site-update 2.1: the update write --------------------------------------------------
+
+
+@respx.mock
+def test_update_write_sends_one_post():
+    route = respx.post(method_url("press.api.site.update")).respond(json={"message": "su-0001"})
+    result = make_client().write(
+        "press.api.site.update", team="acme", name="erp.acme.example.com",
+        skip_failing_patches=False, skip_backups=False,
+    )  # fmt: skip
+    assert result == "su-0001"
+    request = route.calls.last.request
+    assert request.method == "POST"
+    assert request.headers["X-Press-Team"] == "acme"
+    assert json.loads(request.content) == {
+        "name": "erp.acme.example.com",
+        "skip_failing_patches": False,
+        "skip_backups": False,
+    }
+
+
+@pytest.mark.parametrize("outcome", [httpx.Response(502), httpx.ReadTimeout("t")])
+def test_update_write_unknown_names_site_show(outcome):
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        route = router.post(method_url("press.api.site.update"))
+        if isinstance(outcome, Exception):
+            route.side_effect = outcome
+        else:
+            route.return_value = outcome
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write("press.api.site.update", team="t", name="erp.acme.example.com")
+        assert route.call_count == 1
+    assert "update request" in info.value.message
+    assert "not known" in info.value.message
+    assert info.value.hint == "Run: fcm site-show erp.acme.example.com"

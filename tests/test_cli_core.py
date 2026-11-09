@@ -84,7 +84,7 @@ def test_every_command_is_one_noun_verb_word_with_a_fixed_verb():
         [
             "profile-add", "profile-list", "profile-test", "profile-remove",
             "team-list", "bench-list", "bench-show", "bench-deploy", "site-list", "site-show",
-            "site-migrate",
+            "site-migrate", "site-update",
         ]
     )  # fmt: skip
     for name, command in _commands():

@@ -17,6 +17,8 @@ masked. Long commit messages are cut to their first line.
 | `error_not_found.json` | `site.get` for a site that does not exist | HTTP **403** `PermissionError`, not 404. |
 | `site_running_jobs.json` | `site.running_jobs` for one site | SYNTHETIC row: the spike run of 2026-11-09 gave HTTP 200 with an empty list (no job was running). The row has the shape of press `job_detail` (`id` is the job, `name` the job type). FC has no job list that works over GET: `site.jobs` and `client.get_list` both gave HTTP 500 `AttributeError`. |
 | `site_job.json` | `site.job` for one job | SYNTHETIC: fields from the press source. The step names are a guess. The first real migrate (task 7.2) checks them. |
+| `site_check_for_updates.json` | `site.check_for_updates` for one site | SYNTHETIC: fields from the press source (`frappe/press` `master`, 2026-11-09). Hashes are made up. Spike question 5 reads the real shape; its run of 2026-11-09 got HTTP 403 (no permission on the only site with an update), so the shape is not confirmed yet. |
+| `site_update.json` | `client.get` of `Site Update` | SYNTHETIC: `dashboard_fields` and the `steps` of the `get_doc` hook, from the press source. The step titles are a guess. The first real update (task 7.2) checks them. FC list reads fail over GET, so no past record can be read. |
 | `error_permission.json` | - | SYNTHETIC: FC gave no error for an unknown team, so no real body exists yet. |
 
 Never commit a fixture that holds a real email, IP address, host name, API key or secret.

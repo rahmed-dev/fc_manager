@@ -30,6 +30,7 @@ from fc_manager.cli.common import (
     team_label,
 )
 from fc_manager.cli.inventory import _bench_json, _resolve_bench
+from fc_manager.cli.inventory import team_option as _team_option
 from fc_manager.cli.root import app
 from fc_manager.cli.watch import WatchView, changes, steps_table
 from fc_manager.deploy import (
@@ -63,11 +64,6 @@ def _scoped(err: FcmError, bench: Bench) -> FcmError:
     if err.target and not err.target.startswith("team "):
         return err
     return explain_team_error(err, bench.team)
-
-
-def _team_option(team) -> str:
-    label = team_label(team)
-    return f"{label}  - {team.owner}" if team.owner and team.owner not in label else label
 
 
 def _pick_bench(s: Session, teams, query: str | None, *, start_team=None) -> Bench:

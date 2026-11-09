@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 from enum import StrEnum
 from typing import Annotated
@@ -20,12 +21,13 @@ from fc_manager.cli.common import (
     raise_failures,
     scope_teams,
     session,
+    target_path,
     team_label,
     teams_phrase,
 )
 from fc_manager.cli.root import app
 from fc_manager.errors import NotFound, PermissionDenied, UsageError
-from fc_manager.inventory import Ambiguous, Bench, Fanout, Resolved, Site, resolve
+from fc_manager.inventory import Ambiguous, Bench, Fanout, Resolved, Site, Team, resolve
 from fc_manager.output import Column
 
 
@@ -202,19 +204,86 @@ def resolve_site(s: Session, teams, query: str) -> Site:
     return _match_site(s, s.inventory.sites(teams), teams, query)
 
 
-def choose_site(s: Session, bench: Bench, *, back: bool, path: str | None = None) -> Site | None:
+def choose_site(
+    s: Session,
+    bench: Bench,
+    *,
+    back: bool,
+    path: str | None = None,
+    only: Callable[[Site], bool] | None = None,
+    empty: str | None = None,
+) -> Site | None:
     """The site step: one site of `bench`, picked from the sites of that bench only.
-    Returns None when the bench has no site. Esc raises picker.GoBack when `back`."""
+    `only` narrows the list (for example to the sites with an update), and `empty` is the
+    message when no site is left. Returns None when no site is left. Esc raises
+    picker.GoBack when `back`."""
     result = s.inventory.sites([bench.team])
     if result.failures:
         raise_failures(result, [bench.team])
     rows = [x for x in result.rows if x.bench == bench.name]
+    if only is not None:
+        rows = [x for x in rows if only(x)]
     if not rows:
-        s.out.message(f"Bench {bench.title or bench.name} has no site.")
+        name = bench.title or bench.name
+        s.out.message(empty.format(bench=name) if empty else f"Bench {name} has no site.")
         return None
     return picker.choose(
         "Site", [(f"{x.name}  ({x.status})", x) for x in rows], back=back, path=path
     )
+
+
+def team_option(team: Team) -> str:
+    """A team in the team picker: the label, and the owner when the label does not show it."""
+    label = team_label(team)
+    return f"{label}  - {team.owner}" if team.owner and team.owner not in label else label
+
+
+def walk_to_site(
+    s: Session,
+    teams: list[Team],
+    only: Callable[[Site], bool] | None = None,
+    empty: str | None = None,
+) -> Site:
+    """Team (skipped with one team), then a bench of that team, then a site of that bench.
+    `only` and `empty` narrow the site step (see choose_site). Esc goes back one step. Each
+    prompt shows the target path."""
+    many = len(teams) > 1
+    team: Team | None = None if many else teams[0]
+    bench: Bench | None = None
+    while True:
+        if team is None:
+            team = picker.choose("Team", [(team_option(t), t) for t in teams], path=target_path(s))
+        if bench is None:
+            result = s.inventory.benches([team])
+            if result.failures:
+                raise_failures(result, [team])
+            if not result.rows:
+                if not many:
+                    raise NotFound(f"No benches found in team {team.display}")
+                s.out.message(f"No benches in team {team.display}. Pick another team.")
+                team = None
+                continue
+            try:
+                bench = picker.choose(
+                    "Bench",
+                    [(f"{b.title} ({b.name})", b) for b in result.rows],
+                    back=many,
+                    path=target_path(s, team),
+                )
+            except picker.GoBack:
+                team = None
+                continue
+        try:
+            site = choose_site(
+                s, bench, back=True, path=target_path(s, team, bench), only=only, empty=empty
+            )
+        except picker.GoBack:
+            bench = None
+            continue
+        if site is None:
+            bench = None
+            continue
+        return site
 
 
 @app.command("site-list", rich_help_panel="Site")

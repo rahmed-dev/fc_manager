@@ -1,12 +1,13 @@
 """`fcm` with no command: the menu walk (team, then bench, then an action for that bench).
 
 The menu only routes. Each action runs the same work function as its direct command
-(`show_bench`, `deploy_bench`, `migrate_site`), so the FC requests, the preview and the
-typed confirmation are the same code. Every prompt shows the target path:
+(`show_bench`, `deploy_bench`, `migrate_site`, `update_site`), so the FC requests, the
+preview and the typed confirmation are the same code. Every prompt shows the target path:
 profile > team > bench, and > site after the site step of a site action.
 
 A new action is one `Action` entry in `ACTIONS`. A site action gets the site step (a site
-of the picked bench) before it runs.
+of the picked bench) before it runs. Its `site_filter` can narrow that list, with
+`site_empty` as the message when no site is left.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 
 import typer
 
-from fc_manager.cli import deploy, migrate, picker
+from fc_manager.cli import deploy, migrate, picker, update
 from fc_manager.cli.common import (
     ProfileOpt,
     Session,
@@ -43,6 +44,8 @@ class Action:
     command: str
     scope: str  # "bench" or "site"
     run: Callable[[Session, Bench, Site | None, str], None]
+    site_filter: Callable[[Site], bool] | None = None
+    site_empty: str | None = None  # "{bench}" is the bench title
 
     @property
     def title(self) -> str:
@@ -58,6 +61,10 @@ ACTIONS = [
     Action("migrate", "Migrate a site", "site-migrate", "site",
            lambda s, bench, site, path: migrate.migrate_site(
                s, site, migrate.MigrateOptions(), in_menu=True, path=path)),
+    Action("update", "Update a site", "site-update", "site",
+           lambda s, bench, site, path: update.update_site(
+               s, site, update.UpdateOptions(), in_menu=True, path=path),
+           site_filter=update.has_update, site_empty=update.EMPTY_SITE_STEP),
 ]  # fmt: skip
 
 
@@ -137,8 +144,15 @@ def _action_loop(s: Session, team: Team, bench: Bench) -> str:
         try:
             site = None
             if action.scope == "site":
-                site = choose_site(s, bench, back=True, path=path)
-                if site is None:  # the bench has no site; choose_site said so
+                site = choose_site(
+                    s,
+                    bench,
+                    back=True,
+                    path=path,
+                    only=action.site_filter,
+                    empty=action.site_empty,
+                )
+                if site is None:  # no site is left; choose_site said so
                     continue
             action.run(s, bench, site, target_path(s, team, bench, site))
         except picker.GoBack:

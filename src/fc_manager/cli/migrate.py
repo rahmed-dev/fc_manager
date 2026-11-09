@@ -22,18 +22,16 @@ from fc_manager.cli.common import (
     Session,
     TeamOpt,
     explain_team_error,
-    raise_failures,
     scope_teams,
     session,
-    target_path,
     team_label,
 )
-from fc_manager.cli.deploy import WatchStopped, _team_option
-from fc_manager.cli.inventory import choose_site, resolve_site
+from fc_manager.cli.deploy import WatchStopped
+from fc_manager.cli.inventory import resolve_site, walk_to_site
 from fc_manager.cli.root import app
 from fc_manager.cli.watch import WatchView, changes, steps_table
-from fc_manager.errors import FcmError, NotFound, UsageError
-from fc_manager.inventory import Bench, Site, Team
+from fc_manager.errors import FcmError, UsageError
+from fc_manager.inventory import Site
 from fc_manager.migrate import MigratePlan, MigrateService, MigrateState
 
 STAGE_TEXT = {
@@ -230,46 +228,6 @@ def migrate_site(
         )
 
 
-def _walk_to_site(s: Session, teams: list[Team]) -> Site:
-    """Team (skipped with one team), then a bench of that team, then a site of that bench.
-    Esc goes back one step. Each prompt shows the target path."""
-    many = len(teams) > 1
-    team: Team | None = None if many else teams[0]
-    bench: Bench | None = None
-    while True:
-        if team is None:
-            team = picker.choose("Team", [(_team_option(t), t) for t in teams], path=target_path(s))
-        if bench is None:
-            result = s.inventory.benches([team])
-            if result.failures:
-                raise_failures(result, [team])
-            if not result.rows:
-                if not many:
-                    raise NotFound(f"No benches found in team {team.display}")
-                s.out.message(f"No benches in team {team.display}. Pick another team.")
-                team = None
-                continue
-            try:
-                bench = picker.choose(
-                    "Bench",
-                    [(f"{b.title} ({b.name})", b) for b in result.rows],
-                    back=many,
-                    path=target_path(s, team),
-                )
-            except picker.GoBack:
-                team = None
-                continue
-        try:
-            site = choose_site(s, bench, back=True, path=target_path(s, team, bench))
-        except picker.GoBack:
-            bench = None
-            continue
-        if site is None:
-            bench = None
-            continue
-        return site
-
-
 @app.command("site-migrate", rich_help_panel="Site")
 def site_migrate(
     site: Annotated[
@@ -307,7 +265,7 @@ def site_migrate(
     )
     with session(profile, json_mode, debug) as s:
         teams = scope_teams(s, team)
-        target = resolve_site(s, teams, site) if site else _walk_to_site(s, teams)
+        target = resolve_site(s, teams, site) if site else walk_to_site(s, teams)
         if not interactive and not dry_run and confirm != target.name:
             _confirm(s, target, confirm)  # raises before any check or write
         migrate_site(s, target, options)

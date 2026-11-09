@@ -145,3 +145,25 @@ class MigrateUnknown(FcmError):
     """FC accepted a migrate, but fcm cannot find its job. The result is not known (exit 6)."""
 
     kind = ErrorKind.SERVER
+
+
+class UpdateFailed(FcmError):
+    """FC accepted a site update, and the update then failed on FC (exit 8). `outcome` is
+    what FC did with the site: "failure" (no recovery), "recovered", "fatal" or
+    "cancelled"."""
+
+    kind = ErrorKind.JOB_FAILED
+
+    def __init__(
+        self, message: str, *, step: str | None = None, outcome: str = "failure", **kwargs
+    ) -> None:
+        super().__init__(message, **kwargs)
+        self.step = step
+        self.outcome = outcome
+
+
+class UpdateUnknown(FcmError):
+    """FC accepted a site update, but its answer holds no update record name. The result is
+    not known (exit 6)."""
+
+    kind = ErrorKind.SERVER

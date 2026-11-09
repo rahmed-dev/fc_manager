@@ -1,0 +1,43 @@
+{
+  "message": {
+    "update_available": true,
+    "apps": [
+      {
+        "app": "frappe",
+        "title": "Frappe Framework",
+        "current_hash": "1111111111111111111111111111111111111111",
+        "current_tag": "v16.1.0",
+        "next_hash": "2222222222222222222222222222222222222222",
+        "next_tag": "v16.2.0",
+        "branch": "version-16",
+        "current_branch": "version-16",
+        "will_branch_change": false,
+        "update_available": true
+      },
+      {
+        "app": "erpnext",
+        "title": "ERPNext",
+        "current_hash": "3333333333333333333333333333333333333333",
+        "current_tag": "v16.1.0",
+        "next_hash": "3333333333333333333333333333333333333333",
+        "next_tag": "v16.1.0",
+        "branch": "version-16",
+        "current_branch": "version-16",
+        "will_branch_change": false,
+        "update_available": false
+      },
+      {
+        "app": "hrms",
+        "title": "Frappe HR",
+        "current_hash": "4444444444444444444444444444444444444444",
+        "current_tag": null,
+        "next_hash": "5555555555555555555555555555555555555555",
+        "next_tag": null,
+        "branch": "version-16",
+        "current_branch": "version-15",
+        "will_branch_change": true,
+        "update_available": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "message": {
+    "name": "su-0001",
+    "doctype": "Site Update",
+    "status": "Running",
+    "site": "site-1.example.com",
+    "source_bench": "bench-1",
+    "destination_bench": "bench-2",
+    "group": "group-1",
+    "deploy_type": "Migrate",
+    "skipped_failing_patches": 0,
+    "skipped_backups": 0,
+    "update_job": "job-11",
+    "recover_job": null,
+    "update_start": "2026-11-09 12:00:00.000000",
+    "update_end": null,
+    "steps": [
+      {
+        "name": "step-1",
+        "title": "Deactivate Site",
+        "status": "Success",
+        "output": "",
+        "stage": "Deactivate Site"
+      },
+      {
+        "name": "step-2",
+        "title": "Backup Site",
+        "status": "Success",
+        "output": "",
+        "stage": "Backup Site"
+      },
+      {
+        "name": "step-3",
+        "title": "Move Site",
+        "status": "Running",
+        "output": "",
+        "stage": "Update Site"
+      },
+      {
+        "name": "step-4",
+        "title": "Migrate Site",
+        "status": "Pending",
+        "output": "",
+        "stage": "Update Site"
+      },
+      {
+        "name": "step-5",
+        "title": "Activate Site",
+        "status": "Pending",
+        "output": "",
+        "stage": "Activate Site"
+      }
+    ]
+  }
+}

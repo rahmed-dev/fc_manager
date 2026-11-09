@@ -31,6 +31,7 @@ COMMANDS = [
     ["bench-show", "bench-1234"],
     ["bench-deploy", "bench-1234", "--all-apps", "--dry-run"],
     ["site-migrate", "erp.acme.example.com", "--dry-run"],
+    ["site-update", "erp.acme.example.com", "--dry-run"],
 ]
 
 FLAGS = [[], ["--debug"], ["--json"], ["--debug", "--json"]]
@@ -114,12 +115,14 @@ WALK = COMMANDS + [
     ["profile-list"],
     ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", "--no-wait"],
     ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com", "--no-wait"],
+    ["site-update", "erp.acme.example.com", "--confirm", "erp.acme.example.com", "--no-wait"],
 ]
 
 DEPLOY = "press.api.bench.deploy_and_update"
 MIGRATE = "press.api.site.migrate"
+UPDATE = "press.api.site.update"
 # Each write command and the one write method it may send.
-OWN_WRITE = {"bench-deploy": DEPLOY, "site-migrate": MIGRATE}
+OWN_WRITE = {"bench-deploy": DEPLOY, "site-migrate": MIGRATE, "site-update": UPDATE}
 
 
 def posts(fake) -> list[str]:
@@ -173,9 +176,21 @@ def test_walk_detects_the_wrong_write_from_site_migrate(env, cli, strict_fc, mon
 
     save_profile("work")
     monkeypatch.setattr(migrate, "MIGRATE_METHOD", DEPLOY)
-    command = WALK[-1]
+    command = next(c for c in WALK if c[0] == "site-migrate" and "--confirm" in c)
     cli(*command)
     assert posts(strict_fc) == [DEPLOY]
+    assert posts(strict_fc) != expected_posts(command)
+
+
+def test_walk_detects_the_wrong_write_from_site_update(env, cli, strict_fc, monkeypatch):
+    """Guard for the guard: site-update that sent the migrate method would fail the walk."""
+    from fc_manager import update
+
+    save_profile("work")
+    monkeypatch.setattr(update, "UPDATE_METHOD", MIGRATE)
+    command = next(c for c in WALK if c[0] == "site-update" and "--confirm" in c)
+    cli(*command)
+    assert posts(strict_fc) == [MIGRATE]
     assert posts(strict_fc) != expected_posts(command)
 
 
@@ -185,7 +200,7 @@ def test_strict_router_fails_on_a_method_off_the_allowlist(env, strict_fc):
         httpx.get(f"{BASE}/api/method/press.api.bench.deploy")
 
 
-# --- bench-deploy 2.4 / site-migrate 5.3: the write path never leaks the canary -----
+# --- deploy 2.4, migrate 5.3, update 5.3: the write path never leaks the canary ---------
 
 WRITE_ERRORS = {
     "server": lambda r: httpx.Response(502, text=_echo_headers(r)),
@@ -200,6 +215,7 @@ WRITE_ERRORS = {
 WRITE_COMMANDS = [
     ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234"],
     ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com"],
+    ["site-update", "erp.acme.example.com", "--confirm", "erp.acme.example.com"],
 ]
 
 

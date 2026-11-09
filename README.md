@@ -2,9 +2,10 @@
 
 `fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
 all the teams that your FC login can reach, to deploy app updates to a bench, and to
-migrate a site.
+migrate or update a site.
 
-Two commands change FC: `fcm bench-deploy` and `fcm site-migrate`. Each one shows a
+Three commands change FC: `fcm bench-deploy`, `fcm site-migrate` and `fcm site-update`.
+Each one shows a
 preview of the target and the change, and starts nothing until you type the bench title or
 the site name. Every other command is read-only.
 
@@ -69,6 +70,7 @@ fcm site-show                                  # on a terminal: pick the site fr
 fcm bench-show "ACME Prod"                     # apps with updates, sites, a running deploy
 fcm bench-deploy "ACME Prod"                   # deploy app updates (see below)
 fcm site-migrate erp.acme.com                  # run bench migrate on one site (see below)
+fcm site-update erp.acme.com                   # move a site to the newest bench (see below)
 ```
 
 Options that work on every command:
@@ -109,20 +111,21 @@ Run `fcm` with no command on a terminal to open the menu:
 1. **Team**: pick a team (skipped when your login reaches one team only).
 2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
 3. **Action**: "Show bench (bench-show)", "Deploy app updates (bench-deploy)", "Migrate a
-   site (site-migrate)", "Pick another bench", or "Quit".
+   site (site-migrate)", "Update a site (site-update)", "Pick another bench", or "Quit".
 4. **Site** (site actions only): pick a site of that bench. The list shows only the sites
-   of that bench, with their status.
+   of that bench, with their status. "Update a site" lists only the sites that have an
+   update.
 
 Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`,
 and after a site pick `work > ACME Corp > ACME Prod (bench-1234) > erp.acme.com`. Each
-action runs the same code as its command, so a deploy or a migrate shows the same preview
-and asks for the same typed confirmation. After an action ends, also with an error or a
-cancelled confirmation, the action menu of the same bench opens again.
+action runs the same code as its command, so a deploy, a migrate or an update shows the
+same preview and asks for the same typed confirmation. After an action ends, also with an
+error or a cancelled confirmation, the action menu of the same bench opens again.
 
 Esc goes back one step: site to action menu, action menu to bench, bench to team, team out
 of `fcm`. Esc at the app step of a deploy goes back to the action menu. Ctrl+C at a menu
-prompt ends `fcm` (exit 130). Ctrl+C during a deploy or migrate watch stops the watch only,
-and the action menu opens again.
+prompt ends `fcm` (exit 130). Ctrl+C during a deploy, migrate or update watch stops the
+watch only, and the action menu opens again.
 `fcm --profile NAME` opens the menu with that profile. Without a terminal, `fcm` prints the
 help.
 
@@ -191,6 +194,43 @@ Without a terminal, you must give the site and `--confirm` with the site name. T
 about it, and the menu never turns it on. When no new migrate job shows up within 2
 minutes after FC accepts the request, `fcm` says that the result is not known (exit 6).
 
+### Update a site
+
+`fcm site-update` moves one site to the newest bench of its bench group, as the "Update"
+action in the FC dashboard does. FC takes the site down for the update and takes a backup
+of the site first. On a terminal it walks you through these steps:
+
+1. **Site.** Give the site name, or pick it: team, then bench, then a site of that bench
+   that has an update.
+2. **Checks.** `fcm` reads the FC update info, the site status and the FC jobs of the site.
+   A site with no update ends here with exit 0, and nothing is sent. `fcm` stops, and sends
+   nothing, when the site status is not Active or Inactive (this rule is stricter than FC:
+   fix a Broken site first), or when the site has an FC job in progress.
+3. **Preview.** The profile, the team and its owner, the bench, the site and its status,
+   each app with an update and its current and next version (the release tag, else the
+   short commit hash), a note for each app whose branch changes, and the patch mode.
+4. **Confirm.** Type the site name exactly. Any other input cancels, and nothing is sent.
+5. **Progress.** `fcm` follows the new FC update record and its steps until it ends. When
+   the update fails, FC usually restores the site to the old bench; the watch shows that
+   too. Ctrl+C stops the watch only: the update continues on FC.
+6. **Result.** "the site is updated" with the new bench (exit 0). A failed update exits
+   with code 8 and says what FC did: it restored the site to the old bench (Recovered), it
+   could not restore the site (Fatal: contact FC support), or the update was cancelled.
+   When the update stays failed for 10 minutes and FC starts no restore, `fcm` also exits
+   with code 8. The result shows the site status on FC after the update.
+
+```bash
+fcm site-update --dry-run                              # pick team, bench, site; preview only
+fcm site-update erp.acme.com --confirm erp.acme.com    # in a script
+fcm site-update erp.acme.com --confirm erp.acme.com --no-wait --json
+```
+
+Without a terminal, you must give the site and `--confirm` with the site name. There is no
+`--yes`, and there is no option to skip the FC backup. `--skip-failing-patches` lets FC
+continue past a failing patch; the preview warns about it, and the menu never turns it on.
+When FC does not confirm the request, or confirms it without the name of the update
+record, `fcm` says that the update state is not known (exit 6).
+
 ### Exit codes
 
 | Code | Meaning |
@@ -201,9 +241,9 @@ minutes after FC accepts the request, `fcm` says that the result is not known (e
 | 3 | Authentication error (FC rejected the key) |
 | 4 | Permission error |
 | 5 | Not found |
-| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, or a migrate job not found in 2 minutes) |
+| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, a migrate job not found in 2 minutes, or an update with no record name) |
 | 7 | Partial failure across teams |
-| 8 | FC accepted a deploy or a migrate, but it failed on FC (a failed build step or migrate step) |
+| 8 | FC accepted a deploy, a migrate or a site update, but it failed on FC (a failed build step, migrate step or update, also when FC restored the site to the old bench) |
 
 ## Credentials and security
 
@@ -229,15 +269,16 @@ minutes after FC accepts the request, `fcm` says that the result is not known (e
   output, errors and `--debug` output.
 - **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
 - **Allowlists.** The HTTP client has a fixed allowlist of read-only FC API methods (GET)
-  and a separate write allowlist with 2 methods (POST): `press.api.bench.deploy_and_update`,
-  used only by `fcm bench-deploy`, and `press.api.site.migrate`, used only by
-  `fcm site-migrate`. A call to any other method fails inside `fcm` before any request goes
-  out. The generic FC document read (`press.api.client.get`) is allowed for the deploy
-  build doctype only. The generic FC list read (`press.api.client.get_list`) is not allowed.
-- **No retry of a write.** A deploy or migrate request is sent one time only. When FC does
+  and a separate write allowlist with 3 methods (POST): `press.api.bench.deploy_and_update`,
+  used only by `fcm bench-deploy`, `press.api.site.migrate`, used only by
+  `fcm site-migrate`, and `press.api.site.update`, used only by `fcm site-update`. A call to
+  any other method fails inside `fcm` before any request goes out. The generic FC document
+  read (`press.api.client.get`) is allowed for 2 doctypes only: the deploy build and the
+  site update record. The generic FC list read (`press.api.client.get_list`) is not allowed.
+- **No retry of a write.** A deploy, migrate or update request is sent one time only. When FC does
   not confirm it (a timeout or a server error), `fcm` says that the result on FC is not
   known and tells you to run `fcm bench-show` or `fcm site-show`. A retry could start a
-  second deploy or migrate.
+  second deploy, migrate or update.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
 

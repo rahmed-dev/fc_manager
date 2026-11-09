@@ -14,7 +14,7 @@ from fc_manager.errors import UsageError
 NOUNS = ("profile", "team", "bench", "site")
 READ_VERBS = frozenset({"list", "show", "add", "remove", "test"})
 # Each write verb previews and asks for a typed confirmation.
-WRITE_VERBS = frozenset({"deploy", "migrate"})
+WRITE_VERBS = frozenset({"deploy", "migrate", "update"})
 PLURALS = {"profiles": "profile", "teams": "team", "benches": "bench", "sites": "site"}
 PANELS = {noun: noun.capitalize() for noun in NOUNS}
 

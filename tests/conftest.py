@@ -170,6 +170,13 @@ class FakeFC:
     job_docs: list = field(default_factory=list)
     migrate_posts: list = field(default_factory=list)
     migrate_makes_job: bool = True  # False: FC accepts the migrate, but no job shows up
+    # update: check_for_updates bodies per site (default: the fixture when the site row has
+    # update_available, else no update), Site Update records (a sequence; the last
+    # repeats), the POST bodies, and the record name FC returns from the update POST.
+    update_infos: dict = field(default_factory=dict)
+    update_records: list = field(default_factory=list)
+    update_posts: list = field(default_factory=list)
+    update_answer: object = "su-new"
 
     @staticmethod
     def _next(seq: list, default):
@@ -215,6 +222,29 @@ class FakeFC:
                     0, {"name": "job-new", "job_type": "Migrate Site", "status": "Pending"}
                 )
             return httpx.Response(200, json={"message": None})
+        if method == "press.api.site.update":
+            self.update_posts.append(json.loads(request.content))
+            if self.post_error:
+                status, body = self.post_error
+                return httpx.Response(status, json=body)
+            return httpx.Response(200, json={"message": self.update_answer})
+        if method == "press.api.site.check_for_updates":
+            name = request.url.params["name"]
+            if name in self.update_infos:
+                return httpx.Response(200, json={"message": self.update_infos[name]})
+            row = next((r for rows in self.sites.values() for r in rows if r["name"] == name), None)
+            if row is not None and row.get("update_available"):
+                return httpx.Response(200, json=fixture("site_check_for_updates.json"))
+            return httpx.Response(200, json={"message": {"update_available": False}})
+        if method == "press.api.client.get" and request.url.params.get("doctype") == "Site Update":
+            done = {
+                "name": request.url.params["name"],
+                "status": "Success",
+                "source_bench": "bench-1234-000001-f1",
+                "destination_bench": "bench-1234-000002-f1",
+                "steps": [{"title": "Move Site", "status": "Success"}],
+            }
+            return httpx.Response(200, json={"message": self._next(self.update_records, done)})
         if method == "press.api.site.running_jobs":
             rows = [
                 {"id": j["name"], "name": j["job_type"], "status": j["status"], "steps": []}

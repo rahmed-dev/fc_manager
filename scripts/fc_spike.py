@@ -16,6 +16,8 @@ It answers three questions:
   4. What do the site job reads return (site.running_jobs for one site, and site.job for
      a running job)?
      The spike never calls a migrate (write) method.
+  5. What does site.check_for_updates return for a site that has an update?
+     The spike never calls an update (write) method.
 
 Review every fixture before you commit it. The anonymizer replaces names, titles, emails,
 IP addresses and host names, but you are the last check.
@@ -47,8 +49,11 @@ SENSITIVE_KEYS = {
     "last_name", "host_name", "bench", "group", "server", "proxy_server", "ip", "domain",
     "repository", "repository_url", "repository_owner", "commit_message", "owner",
     "modified_by", "parent_team", "partner_email", "app_title", "deploy_candidate", "site",
-    "id",
+    "id", "current_hash", "next_hash",
 }  # fmt: skip
+# Apps whose names are public. check_for_updates rows have no repository owner, so any other
+# app name in them is replaced (a private app name can name a client).
+PUBLIC_APPS = {"frappe", "erpnext", "hrms", "payments", "crm", "helpdesk", "insights", "lms"}
 PUBLIC_OWNERS = {"frappe"}
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -230,6 +235,17 @@ def slim_jobs(data: Any) -> Any:
     return data
 
 
+def slim_updates(data: Any) -> Any:
+    """check_for_updates rows: replace private app names. Hashes and repository fields go
+    through the anonymizer (SENSITIVE_KEYS)."""
+    message = data.get("message") if isinstance(data, dict) else None
+    rows = message.get("apps") if isinstance(message, dict) else None
+    for n, row in enumerate(rows or [], start=1):
+        if isinstance(row, dict) and str(row.get("app")) not in PUBLIC_APPS:
+            row["app"] = f"app-{n}"
+    return data
+
+
 def trim(data: Any) -> Any:
     if isinstance(data, dict) and isinstance(data.get("message"), list):
         return {**data, "message": data["message"][:MAX_ROWS]}
@@ -315,6 +331,26 @@ def main() -> int:
             job = spike.get("press.api.site.job", team=team, job=rows[0]["id"])
             raw["site_job.json"] = slim_job(trim_lists(body(job), 30))
             print(f"  site.job ({rows[0].get('name')}) -> HTTP {job.status_code}")
+
+    # Question 5: update info of one site (GET only; no update is ever started).
+    print("\nSite update reads:")
+    update_site: tuple[str, str] | None = None
+    for team in teams:  # every team: a site with an update can be in any of them
+        rows = (body(spike.get("press.api.site.all", team=team)) or {}).get("message") or []
+        found = [r for r in rows if isinstance(r, dict) and r.get("update_available")]
+        if found:
+            update_site = (team, found[0]["name"])
+            break
+    if update_site:
+        team, site = update_site
+        info = spike.get("press.api.site.check_for_updates", team=team, name=site)
+        data = body(info)
+        message = data.get("message") if isinstance(data, dict) else None
+        apps = message.get("apps") if isinstance(message, dict) else None
+        print(f"  site.check_for_updates -> HTTP {info.status_code}, apps: {len(apps or [])}")
+        raw["site_check_for_updates.json"] = slim_updates(trim_lists(data, 20))
+    else:
+        print("  no site with update_available found; nothing read")
 
     # Question 3: deploy read methods (GET only; no deploy is ever started).
     print("\nDeploy read methods:")
