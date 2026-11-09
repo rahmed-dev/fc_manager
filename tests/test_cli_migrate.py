@@ -195,7 +195,7 @@ def tty(monkeypatch):
     seen = {"choose": [], "text": []}
     answers = {"choose": [], "text": []}
 
-    def choose(prompt, options, *, back=False, path=None):
+    def choose(prompt, options, *, back=False, path=None, space_picks=False):
         seen["choose"].append({"prompt": prompt, "options": options, "path": path})
         answer = answers["choose"].pop(0)
         if answer is picker.GoBack:
@@ -249,11 +249,13 @@ def test_walk_team_bench_site_with_path(mfc, cli, tty):
 
 def test_walk_esc_at_site_goes_back_to_bench(mfc, cli, tty):
     seen, answers = tty
-    answers["choose"] = ["ACME Corp", "bench-1234", picker.GoBack, "bench-1240", "stage"]
+    answers["choose"] = ["ACME Corp", "bench-1234", picker.GoBack, "bench-1240"]
     answers["text"] = ["nope"]
     result = cli("site-migrate")
     assert result.code == 2
-    assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench", "Site", "Bench", "Site"]
+    # bench-1240 has one site: it is picked with no list, and named
+    assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench", "Site", "Bench"]
+    assert "Site: stage.acme.example.com  (Active)" in result.out
     assert "stage.acme.example.com" in seen["text"][0]
 
 

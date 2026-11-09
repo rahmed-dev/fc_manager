@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import TypeVar
 
 import questionary
+from prompt_toolkit.keys import Keys
 
 from fc_manager.errors import UsageError
 
@@ -19,6 +20,16 @@ T = TypeVar("T")
 MAX_LISTED = 20
 
 _BACK = object()
+
+# Checked rows keep the normal background (the prompt_toolkit default for "selected" is
+# reverse video, which is hard to read). ANSI names follow the terminal theme.
+STYLE = questionary.Style(
+    [
+        ("selected", "noreverse fg:ansigreen"),
+        ("highlighted", "bold"),
+        ("pointer", "fg:ansicyan bold"),
+    ]
+)
 
 
 class Cancelled(UsageError):
@@ -38,6 +49,21 @@ def _bind_back(question) -> None:
     @bindings.add("escape", eager=True)
     def _back(event) -> None:
         event.app.exit(result=_BACK)
+
+
+def _bind_space_picks(question) -> None:
+    """Make Space pick the row under the pointer, as Enter does."""
+    bindings = getattr(getattr(question, "application", None), "key_bindings", None)
+    if bindings is None or not hasattr(bindings, "add"):
+        return
+
+    enter = bindings.get_bindings_for_keys((Keys.ControlM,))
+    if not enter:
+        return
+
+    @bindings.add(" ", eager=True)
+    def _pick(event) -> None:
+        enter[-1].handler(event)  # the questionary Enter handler: pick and end
 
 
 def is_interactive(json_mode: bool) -> bool:
@@ -61,22 +87,29 @@ def choose(
     *,
     back: bool = False,
     path: str | None = None,
+    space_picks: bool = False,
 ) -> T:
     """Show a type-to-filter list. Ctrl+C exits with code 2. With `back`, Esc raises GoBack.
-    With `path`, the target path prints above the prompt."""
+    With `path`, the target path prints above the prompt. With `space_picks`, Space picks
+    the row under the pointer, as Enter does (only for lists whose labels hold no space)."""
     choices = [
         questionary.Choice(title=label, value=index) for index, (label, _) in enumerate(options)
     ]
-    keys = "Enter to pick, Esc to go back" if back else "Enter to pick"
+    keys = "Enter or Space to pick" if space_picks else "Enter to pick"
+    if back:
+        keys += ", Esc to go back"
     question = questionary.select(
         prompt,
         choices=choices,
         use_search_filter=True,
         use_jk_keys=False,
         instruction=f"(type to filter, {keys}, Ctrl+C to cancel)",
+        style=STYLE,
     )
     if back:
         _bind_back(question)
+    if space_picks:
+        _bind_space_picks(question)
     show_path(path)
     answer = question.ask()
     if answer is _BACK:
@@ -108,6 +141,7 @@ def choose_many(
         use_search_filter=True,
         use_jk_keys=False,
         instruction=f"({keys}, Ctrl+C to cancel)",
+        style=STYLE,
     )
     if back:
         _bind_back(question)

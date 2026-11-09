@@ -114,7 +114,8 @@ Run `fcm` with no command on a terminal to open the menu:
    site (site-migrate)", "Update a site (site-update)", "Pick another bench", or "Quit".
 4. **Site** (site actions only): pick a site of that bench. The list shows only the sites
    of that bench, with their status. "Update a site" lists only the sites that have an
-   update.
+   update. Enter or Space picks the site under the pointer. When only one site is left,
+   `fcm` picks it with no list and prints its name.
 
 Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`,
 and after a site pick `work > ACME Corp > ACME Prod (bench-1234) > erp.acme.com`. Each
@@ -137,7 +138,7 @@ you through these steps:
 1. **Team, then bench.** Give the bench by name or title, or pick it: first the team
    (shown by title or owner email), then a bench of that team. With `--team`, `fcm` skips
    the team step. After this step, every FC request goes to the team of that bench only.
-2. **App updates.** All apps with an update are selected. Clear the ones you do not want.
+2. **App updates.** No app is selected. Press Space on each app to deploy, then Enter.
 3. **Sites.** The sites on the bench, **none selected**. With no site selected, the deploy
    goes to the bench only: the sites stay on the old bench, and FC shows "update
    available" for them. A backup is taken before each selected site is updated.
@@ -172,6 +173,7 @@ message and stops. Use the FC dashboard for those cases.
 the FC dashboard does. On a terminal it walks you through these steps:
 
 1. **Site.** Give the site name, or pick it: team, then bench, then a site of that bench.
+   A bench with one site skips the list.
 2. **Checks.** `fcm` reads the site status and the FC jobs of the site. It stops, and sends
    nothing, when FC does not migrate a site in that status (FC migrates a site that is
    Active, Inactive or Broken), or when the site has an FC job in progress.
@@ -201,7 +203,7 @@ action in the FC dashboard does. FC takes the site down for the update and takes
 of the site first. On a terminal it walks you through these steps:
 
 1. **Site.** Give the site name, or pick it: team, then bench, then a site of that bench
-   that has an update.
+   that has an update. When only one site has an update, `fcm` picks it with no list.
 2. **Checks.** `fcm` reads the FC update info, the site status and the FC jobs of the site.
    A site with no update ends here with exit 0, and nothing is sent. `fcm` stops, and sends
    nothing, when the site status is not Active or Inactive (this rule is stricter than FC:

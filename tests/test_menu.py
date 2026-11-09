@@ -25,7 +25,7 @@ def menu(monkeypatch):
     script: list = []
     prompts: list = []
 
-    def choose(prompt, options, *, back=False, path=None):
+    def choose(prompt, options, *, back=False, path=None, space_picks=False):
         prompts.append((prompt, [label for label, _ in options], path))
         answer = script.pop(0)
         if answer is BACK:
@@ -277,16 +277,17 @@ def test_update_entry_follows_migrate():
     assert update.site_filter is not None
 
 
-def test_update_site_step_lists_only_sites_with_an_update(upd, cli, tty, menu):
+def test_update_only_site_with_an_update_is_picked_with_no_list(upd, cli, tty, menu):
     script, prompts = menu
     _, answers = tty
-    script += ["team-acme", "bench-1234", "update", SITE, "quit"]
+    script += ["team-acme", "bench-1234", "update", "quit"]
     answers["text"] = ["nope"]
     result = cli()
     assert result.code == 0, result.err
-    assert names(prompts) == ["Team", "Bench", "Action", "Site", "Action"]
-    assert prompts[3][1] == [f"{SITE}  (Active)"]  # hr.acme has no update
-    assert prompts[3][2] == "work > ACME Corp > ACME Prod (bench-1234)"
+    # only erp.acme has an update (hr.acme has none): picked with no site list
+    assert names(prompts) == ["Team", "Bench", "Action", "Action"]
+    assert f"Site: {SITE}  (Active)" in result.out
+    assert "Update preview" in result.out
 
 
 def test_update_bench_with_no_update_returns_to_actions(upd, cli, tty, menu):
@@ -302,7 +303,7 @@ def test_update_bench_with_no_update_returns_to_actions(upd, cli, tty, menu):
 def test_update_from_menu_sends_nothing_before_the_typed_name(upd, cli, tty, menu):
     script, _ = menu
     seen, answers = tty
-    script += ["team-acme", "bench-1234", "update", SITE, "quit"]
+    script += ["team-acme", "bench-1234", "update", "quit"]
     answers["text"] = ["nope"]
     result = cli()
     assert result.code == 0, result.err
@@ -315,7 +316,7 @@ def test_update_from_menu_sends_nothing_before_the_typed_name(upd, cli, tty, men
 def test_update_from_menu_with_typed_name(upd, cli, tty, menu):
     script, prompts = menu
     _, answers = tty
-    script += ["team-acme", "bench-1234", "update", SITE, "quit"]
+    script += ["team-acme", "bench-1234", "update", "quit"]
     answers["text"] = [SITE]
     result = cli()
     assert result.code == 0, result.err
@@ -331,11 +332,11 @@ def test_ctrl_c_in_update_watch_returns_to_actions(upd, cli, tty, menu, monkeypa
     monkeypatch.setattr(update_cli.time, "sleep", interrupt)
     script, prompts = menu
     _, answers = tty
-    script += ["team-acme", "bench-1234", "update", SITE, "quit"]
+    script += ["team-acme", "bench-1234", "update", "quit"]
     answers["text"] = [SITE]
     upd.update_records = [{"name": "su-new", "status": "Running", "steps": []}]
     result = cli()
     assert result.code == 0, result.err
     assert "The update continues on FC" in result.out
-    assert names(prompts) == ["Team", "Bench", "Action", "Site", "Action"]
+    assert names(prompts) == ["Team", "Bench", "Action", "Action"]
     assert migrate_posts(upd) == ["press.api.site.update"]

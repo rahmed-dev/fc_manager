@@ -215,8 +215,9 @@ def choose_site(
 ) -> Site | None:
     """The site step: one site of `bench`, picked from the sites of that bench only.
     `only` narrows the list (for example to the sites with an update), and `empty` is the
-    message when no site is left. Returns None when no site is left. Esc raises
-    picker.GoBack when `back`."""
+    message when no site is left. Returns None when no site is left. With exactly one site
+    left, it is picked with no prompt and named. Space or Enter picks in the list. Esc
+    raises picker.GoBack when `back`."""
     result = s.inventory.sites([bench.team])
     if result.failures:
         raise_failures(result, [bench.team])
@@ -227,8 +228,16 @@ def choose_site(
         name = bench.title or bench.name
         s.out.message(empty.format(bench=name) if empty else f"Bench {name} has no site.")
         return None
+    if len(rows) == 1:
+        site = rows[0]
+        s.out.message(f"Site: {site.name}  ({site.status})")
+        return site
     return picker.choose(
-        "Site", [(f"{x.name}  ({x.status})", x) for x in rows], back=back, path=path
+        "Site",
+        [(f"{x.name}  ({x.status})", x) for x in rows],
+        back=back,
+        path=path,
+        space_picks=True,
     )
 
 

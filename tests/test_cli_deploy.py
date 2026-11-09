@@ -337,7 +337,7 @@ def test_interactive_defaults_and_typed_title(dfc, cli, tty):
     result = cli("bench-deploy", "bench-1234")
     assert result.code == 0, result.err
     apps_step, sites_step = seen["many"]
-    assert apps_step["selected"] is True
+    assert apps_step["selected"] is False  # no app checked by default
     assert sites_step["selected"] is False
     assert [v for _, v in sites_step["options"]] == [SITE]
     assert "ACME Prod" in seen["text"][0]
@@ -364,6 +364,17 @@ def test_interactive_esc_on_sites_goes_back_to_apps(dfc, cli, tty):
     prompts = [s["prompt"].split()[0] for s in seen["many"]]
     assert prompts == ["App", "Sites", "App", "Sites"]
     assert dfc.posts == []
+
+
+def test_interactive_one_app_picked_deploys_that_app_only(dfc, cli, tty):
+    _, answers = tty
+    finish_infos(dfc)
+    answers["many"] = [["hrms"], []]
+    answers["text"] = ["ACME Prod"]
+    result = cli("bench-deploy", "bench-1234")
+    assert result.code == 0, result.err
+    assert len(dfc.posts) == 1
+    assert [row["app"] for row in dfc.posts[0]["apps"]] == ["hrms"]
 
 
 def test_interactive_empty_app_selection_asks_again(dfc, cli, tty):
@@ -406,7 +417,7 @@ def scripted_choose(monkeypatch, script):
     """Patch picker.choose: each entry picks by FC name, or is picker.GoBack."""
     prompts = []
 
-    def choose(prompt, options, *, back=False, path=None):
+    def choose(prompt, options, *, back=False, path=None, space_picks=False):
         prompts.append((prompt, [label for label, _ in options], back))
         answer = script.pop(0)
         if answer is picker.GoBack:

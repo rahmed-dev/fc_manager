@@ -250,7 +250,7 @@ def _choose_apps(s: Session, info: DeployInfo, *, back: bool, path: str | None =
         chosen = picker.choose_many(
             "App updates to deploy",
             [(_app_label(a), a.app) for a in info.updates],
-            selected=True,
+            selected=False,
             back=back,
             path=path,
         )

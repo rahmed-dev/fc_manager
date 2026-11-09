@@ -10,7 +10,7 @@ from fc_manager.cli import update as update_cli
 from fc_manager.migrate import JobStep
 from fc_manager.update import UpdateState
 
-from .conftest import save_profile
+from .conftest import _site, save_profile
 
 SITE = "erp.acme.example.com"
 STEPS = ["Deactivate Site", "Backup Site", "Move Site", "Migrate Site", "Activate Site"]
@@ -228,8 +228,10 @@ def tty(monkeypatch):
     seen = {"choose": [], "text": []}
     answers = {"choose": [], "text": []}
 
-    def choose(prompt, options, *, back=False, path=None):
-        seen["choose"].append({"prompt": prompt, "options": options, "path": path})
+    def choose(prompt, options, *, back=False, path=None, space_picks=False):
+        seen["choose"].append(
+            {"prompt": prompt, "options": options, "path": path, "space_picks": space_picks}
+        )
         answer = answers["choose"].pop(0)
         if answer is picker.GoBack:
             raise picker.GoBack
@@ -263,27 +265,44 @@ def test_wrong_typed_name_cancels(ufc, cli, tty, typed):
     assert writes(ufc) == []
 
 
+def test_walk_one_site_with_an_update_is_picked_with_no_list(ufc, cli, tty):
+    seen, answers = tty
+    answers["choose"] = ["ACME Corp", "bench-1234"]
+    answers["text"] = ["nope"]
+    result = cli("site-update")
+    assert result.code == 2
+    assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench"]  # hr.acme has no update
+    assert f"Site: {SITE}  (Active)" in result.out
+    assert SITE in seen["text"][0]
+    assert writes(ufc) == []
+
+
 def test_walk_lists_only_sites_with_an_update(ufc, cli, tty):
+    ufc.sites["team-acme"].append(
+        _site("crm.acme.example.com", "team-acme", "bench-1234", "ACME Prod", update=True)
+    )
     seen, answers = tty
     answers["choose"] = ["ACME Corp", "bench-1234", SITE]
     answers["text"] = ["nope"]
     result = cli("site-update")
     assert result.code == 2
     assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench", "Site"]
-    assert seen["choose"][2]["path"] == "work > ACME Corp > ACME Prod (bench-1234)"
-    site_labels = [label for label, _ in seen["choose"][2]["options"]]
-    assert site_labels == [f"{SITE}  (Active)"]  # hr.acme has no update
+    site_step = seen["choose"][2]
+    assert site_step["path"] == "work > ACME Corp > ACME Prod (bench-1234)"
+    assert site_step["space_picks"] is True
+    site_labels = [label for label, _ in site_step["options"]]
+    assert site_labels == [f"{SITE}  (Active)", "crm.acme.example.com  (Active)"]
     assert writes(ufc) == []
 
 
 def test_walk_bench_with_no_update_says_so_and_goes_back(ufc, cli, tty):
     seen, answers = tty
-    answers["choose"] = ["ACME Corp", "bench-1240", "bench-1234", SITE]
+    answers["choose"] = ["ACME Corp", "bench-1240", "bench-1234"]
     answers["text"] = ["nope"]
     result = cli("site-update")
     assert result.code == 2
     assert "No site of bench Prod has an update." in result.out
-    assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench", "Bench", "Site"]
+    assert [c["prompt"] for c in seen["choose"]] == ["Team", "Bench", "Bench"]
     assert writes(ufc) == []
 
 

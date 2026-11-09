@@ -94,3 +94,49 @@ def test_path_line_prints_above_the_prompt(monkeypatch):
     printed.clear()
     picker.choose("Action", [("Show", "show")])
     assert printed == ["<prompt>"]
+
+
+# --- picker-ux: style and Space in the site step ---------------------------------------
+
+
+def test_both_pickers_use_the_readable_style(monkeypatch):
+    seen = capture(monkeypatch, [0], name="checkbox")
+    picker.choose_many("Apps", [("erpnext", "e")], selected=False)
+    assert seen["style"] is picker.STYLE
+    seen = capture(monkeypatch, 0, name="select")
+    picker.choose("Site", [("a", 1)])
+    assert seen["style"] is picker.STYLE
+    rules = dict(picker.STYLE.style_rules)
+    assert "noreverse" in rules["selected"]  # no grey reverse background on checked rows
+
+
+def _run_select(monkeypatch, keys, **opts):
+    """Run choose() on a real questionary select, fed by `keys`."""
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    real = questionary.select
+    with create_pipe_input() as pipe:
+        pipe.send_text(keys)
+        monkeypatch.setattr(
+            picker.questionary,
+            "select",
+            lambda *a, **k: real(*a, **k, input=pipe, output=DummyOutput()),
+        )
+        return picker.choose("Site", [("erp.example.com", "erp"), ("crm.example.com", "crm")],
+                             **opts)  # fmt: skip
+
+
+def test_space_picks_the_row_under_the_pointer(monkeypatch):
+    assert _run_select(monkeypatch, "\x1b[B ", space_picks=True) == "crm"
+
+
+def test_space_is_not_bound_by_default(monkeypatch):
+    question = questionary.select("Bench", choices=["a", "b"])
+    before = len(question.application.key_bindings.bindings)
+    picker._bind_space_picks(question)
+    assert len(question.application.key_bindings.bindings) == before + 1
+    monkeypatch.setattr(picker, "_bind_space_picks", lambda q: pytest.fail("Space bound"))
+    seen = capture(monkeypatch, 0, name="select")
+    picker.choose("Bench", [("a", 1)])
+    assert "Enter to pick" in seen["instruction"] and "Space" not in seen["instruction"]
