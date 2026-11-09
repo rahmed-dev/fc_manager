@@ -29,10 +29,10 @@ The help SHALL list all commands in one list, grouped by noun.
 
 #### Scenario: Help grouped by noun
 - **WHEN** the user runs `fcm --help`
-- **THEN** the help lists `profile-add`, `profile-list`, `profile-test`, `profile-remove`, `team-list`, `bench-list`, `bench-show`, `bench-deploy`, `site-list`, and `site-show`, in groups for Profile, Team, Bench, and Site
+- **THEN** the help lists `profile-add`, `profile-list`, `profile-test`, `profile-remove`, `team-list`, `bench-list`, `bench-show`, `bench-deploy`, `site-list`, `site-show`, and `site-migrate`, in groups for Profile, Team, Bench, and Site
 
 ### Requirement: Fixed verb set
-The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The system SHALL use only the verb `deploy` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
+The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The system SHALL use only the verbs `deploy` and `migrate` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
 
 #### Scenario: Detail of one item
 - **WHEN** the user wants the details of one site
@@ -41,6 +41,10 @@ The system SHALL use only these verbs for commands that do not change FC: `list`
 #### Scenario: Write verb
 - **WHEN** the user wants to deploy app updates to a bench
 - **THEN** the command is `fcm bench-deploy <bench>`, and it shows a preview and asks for a typed confirmation before it changes FC
+
+#### Scenario: Migrate verb
+- **WHEN** the user wants to run `bench migrate` on a site
+- **THEN** the command is `fcm site-migrate <site>`, and it shows a preview and asks for a typed confirmation before it changes FC
 
 ### Requirement: Positional target
 When a command acts on one item, the item SHALL be the one positional argument, and it SHALL identify an item of the command's noun. A command SHALL NOT take its main target as an option. The positional argument MAY be left out only where the interactive picker applies.
@@ -128,6 +132,10 @@ The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage o
 
 #### Scenario: Deploy failed on FC
 - **WHEN** FC accepts a deploy and the build then fails
+- **THEN** the exit code is 8
+
+#### Scenario: Migrate failed on FC
+- **WHEN** FC accepts a migrate and the migrate job then fails
 - **THEN** the exit code is 8
 
 ### Requirement: Debug output
