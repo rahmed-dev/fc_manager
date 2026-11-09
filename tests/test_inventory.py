@@ -45,7 +45,7 @@ def profile(env):
 
 def test_partial_failure_shows_other_teams(profile, fc, cli):
     fc.team_errors["team-beta"] = (403, fixture("error_permission.json"))
-    result = cli("site", "list")
+    result = cli("site-list")
     assert result.code == 7
     assert "erp.acme.example.com" in result.out and "own.example.com" in result.out
     assert "erp.beta.example.com" not in result.out
@@ -54,7 +54,7 @@ def test_partial_failure_shows_other_teams(profile, fc, cli):
 
 def test_partial_failure_json(profile, fc, cli):
     fc.team_errors["team-beta"] = (403, fixture("error_permission.json"))
-    result = cli("bench", "list", "--json")
+    result = cli("bench-list", "--json")
     assert result.code == 7
     names = {b["name"] for b in json.loads(result.out)}
     assert names == {"bench-0001", "bench-1234", "bench-1240"}
@@ -63,7 +63,7 @@ def test_partial_failure_json(profile, fc, cli):
 
 def test_single_team_failure_is_that_error(profile, fc, cli):
     fc.team_errors["team-acme"] = (403, fixture("error_permission.json"))
-    result = cli("bench", "list", "--team", "team-acme")
+    result = cli("bench-list", "--team", "team-acme")
     assert result.code == 4
 
 
@@ -71,9 +71,9 @@ def test_child_team_duplicates_appear_once(profile, fc, cli):
     # bench.all and site.all include child teams: the parent sees the child's rows too.
     fc.benches["team-own"] = fc.benches["team-own"] + fc.benches["team-beta"]
     fc.sites["team-own"] = fc.sites["team-own"] + fc.sites["team-beta"]
-    benches = json.loads(cli("bench", "list", "--json").out)
+    benches = json.loads(cli("bench-list", "--json").out)
     assert [b["name"] for b in benches].count("bench-0981") == 1
-    sites = json.loads(cli("site", "list", "--json").out)
+    sites = json.loads(cli("site-list", "--json").out)
     erp_beta = [s for s in sites if s["name"] == "erp.beta.example.com"]
     assert len(erp_beta) == 1
     assert erp_beta[0]["team"]["name"] == "team-beta"  # owner from the row's team field
@@ -118,14 +118,14 @@ def test_no_match_gives_at_most_5_close_matches():
 
 
 def test_team_list_table(profile, fc, cli):
-    result = cli("team", "list")
+    result = cli("team-list")
     assert result.code == 0
     for text in ("team-own", "ACME Corp", "Beta Ltd", "3 teams"):
         assert text in result.out
 
 
 def test_team_list_json(profile, fc, cli):
-    rows = json.loads(cli("team", "list", "--json").out)
+    rows = json.loads(cli("team-list", "--json").out)
     assert rows[1] == {
         "name": "team-acme",
         "title": "ACME Corp",
@@ -138,25 +138,25 @@ def test_team_list_json(profile, fc, cli):
 
 
 def test_bench_list_all_teams_shows_team_column(profile, fc, cli):
-    result = cli("bench", "list")
+    result = cli("bench-list")
     assert result.code == 0
     for text in ("Team", "bench-1234", "ACME Prod", "bench-0981", "Beta Ltd", "4 benches in 3"):
         assert text in result.out
 
 
 def test_bench_list_single_team(profile, fc, cli):
-    rows = json.loads(cli("bench", "list", "--team", "team-acme", "--json").out)
+    rows = json.loads(cli("bench-list", "--team", "team-acme", "--json").out)
     assert {b["name"] for b in rows} == {"bench-1234", "bench-1240"}
     assert set(rows[0]) >= {"team", "name", "title", "version", "status", "sites", "apps"}
 
 
 def test_bench_list_team_by_title(profile, fc, cli):
-    rows = json.loads(cli("bench", "list", "--team", "beta ltd", "--json").out)
+    rows = json.loads(cli("bench-list", "--team", "beta ltd", "--json").out)
     assert [b["name"] for b in rows] == ["bench-0981"]
 
 
 def test_bench_list_unknown_team_lists_valid_teams(profile, fc, cli):
-    result = cli("bench", "list", "--team", "nope")
+    result = cli("bench-list", "--team", "nope")
     assert result.code == 2
     assert "team-acme" in result.err and "ACME Corp" in result.err
 
@@ -165,24 +165,24 @@ def test_bench_list_unknown_team_lists_valid_teams(profile, fc, cli):
 
 
 def test_site_list_columns(profile, fc, cli):
-    result = cli("site", "list", "--team", "team-acme")
+    result = cli("site-list", "--team", "team-acme")
     assert result.code == 0
     for text in ("Site", "Bench", "Status", "Version", "Region", "Update", "available"):
         assert text in result.out
 
 
 def test_site_list_bench_filter_by_name(profile, fc, cli):
-    rows = json.loads(cli("site", "list", "--bench", "bench-1234", "--json").out)
+    rows = json.loads(cli("site-list", "--bench", "bench-1234", "--json").out)
     assert {s["name"] for s in rows} == {"erp.acme.example.com", "hr.acme.example.com"}
 
 
 def test_site_list_bench_filter_by_title(profile, fc, cli):
-    rows = json.loads(cli("site", "list", "--bench", "acme prod", "--json").out)
+    rows = json.loads(cli("site-list", "--bench", "acme prod", "--json").out)
     assert {s["bench"] for s in rows} == {"bench-1234"}
 
 
 def test_site_list_ambiguous_bench_piped_exits_2_with_candidates(profile, fc, cli):
-    result = cli("site", "list", "--bench", "Prod")
+    result = cli("site-list", "--bench", "Prod")
     assert result.code == 2
     assert "bench-1240" in result.err and "bench-0981" in result.err
     assert "ACME Corp" in result.err and "Beta Ltd" in result.err
@@ -197,7 +197,7 @@ def test_site_list_ambiguous_bench_on_terminal_uses_picker(profile, fc, cli, mon
         return next(value for label, value in options if "bench-0981" in label)
 
     monkeypatch.setattr(picker, "choose", choose)
-    result = cli("site", "list", "--bench", "Prod")
+    result = cli("site-list", "--bench", "Prod")
     assert result.code == 0
     assert len(seen["labels"]) == 2
     assert "erp.beta.example.com" in result.out
@@ -205,7 +205,7 @@ def test_site_list_ambiguous_bench_on_terminal_uses_picker(profile, fc, cli, mon
 
 
 def test_site_list_unknown_bench_is_not_found(profile, fc, cli):
-    result = cli("site", "list", "--bench", "zzz")
+    result = cli("site-list", "--bench", "zzz")
     assert result.code == 5
 
 
@@ -226,12 +226,12 @@ def test_site_list_unknown_bench_is_not_found(profile, fc, cli):
     ],
 )
 def test_site_list_status_filter(profile, fc, cli, status, expected):
-    rows = json.loads(cli("site", "list", "--status", status, "--json").out)
+    rows = json.loads(cli("site-list", "--status", status, "--json").out)
     assert {s["name"] for s in rows} == expected
 
 
 def test_site_list_empty_message(profile, fc, cli):
-    result = cli("site", "list", "--team", "team-beta", "--status", "broken")
+    result = cli("site-list", "--team", "team-beta", "--status", "broken")
     assert result.code == 0
     assert "No sites found in team Beta Ltd" in result.out
 
@@ -240,14 +240,14 @@ def test_site_list_empty_message(profile, fc, cli):
 
 
 def test_site_show_found_with_apps(profile, fc, cli):
-    result = cli("site", "show", "erp.acme.example.com")
+    result = cli("site-show", "erp.acme.example.com")
     assert result.code == 0, result.err
     for text in ("ACME Corp", "bench-1234", "f1-mumbai.example.com", "erpnext", "version-16"):
         assert text in result.out
 
 
 def test_site_show_finds_team_and_uses_it(profile, fc, cli):
-    data = json.loads(cli("site", "show", "erp.beta.example.com", "--json").out)
+    data = json.loads(cli("site-show", "erp.beta.example.com", "--json").out)
     assert data["team"]["name"] == "team-beta"
     assert [a["name"] for a in data["apps"]] == ["frappe", "erpnext", "hrms"]
 
@@ -261,18 +261,18 @@ def test_site_show_picker_when_missing_on_terminal(profile, fc, cli, monkeypatch
         return options[0][1]
 
     monkeypatch.setattr(picker, "choose", choose)
-    result = cli("site", "show")
+    result = cli("site-show")
     assert result.code == 0
     assert len(seen["labels"]) == 5  # every site in every team
     assert any("ACME Corp / ACME Prod" in label for label in seen["labels"])
 
 
 def test_site_show_missing_in_json_mode_exits_2(profile, fc, cli):
-    assert cli("site", "show", "--json").code == 2
+    assert cli("site-show", "--json").code == 2
 
 
 def test_site_show_not_found_exits_5(profile, fc, cli):
-    result = cli("site", "show", "missing.example.com")
+    result = cli("site-show", "missing.example.com")
     assert result.code == 5
     assert "missing.example.com" in result.err
 
@@ -280,7 +280,7 @@ def test_site_show_not_found_exits_5(profile, fc, cli):
 def test_bench_title_is_not_guessed_when_a_team_failed(profile, fc, cli):
     # Beta also has a bench titled "Prod". If Beta fails, "Prod" must not resolve to ACME's.
     fc.team_errors["team-beta"] = (403, fixture("error_permission.json"))
-    result = cli("site", "list", "--bench", "Prod")
+    result = cli("site-list", "--bench", "Prod")
     assert result.code == 7
     assert "stage.acme.example.com" not in result.out
     assert "Beta Ltd" in result.err
@@ -288,13 +288,13 @@ def test_bench_title_is_not_guessed_when_a_team_failed(profile, fc, cli):
 
 def test_bench_exact_name_still_works_when_another_team_failed(profile, fc, cli):
     fc.team_errors["team-beta"] = (403, fixture("error_permission.json"))
-    result = cli("site", "list", "--bench", "bench-1240", "--json")
+    result = cli("site-list", "--bench", "bench-1240", "--json")
     assert result.code == 0
     assert [s["name"] for s in json.loads(result.out)] == ["stage.acme.example.com"]
 
 
 def test_counts_use_singular_for_one(profile, fc, cli):
-    assert "1 site in bench" in cli("site", "list", "--bench", "bench-1240").out
+    assert "1 site in bench" in cli("site-list", "--bench", "bench-1240").out
 
 
 # --- real FC shapes (fixtures recorded 2026-11-09) -------------------------------------
@@ -377,24 +377,24 @@ def parent_teams(fc):
 
 
 def test_shared_titles_show_owner_in_lists(profile, parent_teams, cli):
-    result = cli("bench", "list")
+    result = cli("bench-list")
     assert result.code == 0
     assert "Parent Team" not in result.out
     assert "acme@example.com" in result.out and "beta@example.com" in result.out
 
 
 def test_team_list_has_owner_column(profile, fc, cli):
-    result = cli("team", "list")
+    result = cli("team-list")
     assert "Owner" in result.out and "acme@example.com" in result.out
 
 
 def test_team_option_accepts_owner_email(profile, parent_teams, cli):
-    rows = json.loads(cli("bench", "list", "--team", "BETA@example.com", "--json").out)
+    rows = json.loads(cli("bench-list", "--team", "BETA@example.com", "--json").out)
     assert [b["name"] for b in rows] == ["bench-0981"]
 
 
 def test_ambiguous_bench_candidates_show_owner(profile, parent_teams, cli):
-    result = cli("site", "list", "--bench", "Prod")
+    result = cli("site-list", "--bench", "Prod")
     assert result.code == 2
     assert "acme@example.com" in result.err and "beta@example.com" in result.err
 
@@ -447,7 +447,7 @@ def denied_fc(env):
 
 def test_site_show_denied_detail_shows_known_fields(env, denied_fc, cli):
     save_profile("work")
-    result = cli("site", "show", "erp.acme.example.com")
+    result = cli("site-show", "erp.acme.example.com")
     assert result.code == 4
     for text in ("ACME Corp", "bench-1234", "Active", "Version 15", "Mumbai", "available"):
         assert text in result.out
@@ -458,7 +458,7 @@ def test_site_show_denied_detail_shows_known_fields(env, denied_fc, cli):
 
 def test_site_show_denied_detail_json(env, denied_fc, cli):
     save_profile("work")
-    result = cli("site", "show", "erp.acme.example.com", "--json")
+    result = cli("site-show", "erp.acme.example.com", "--json")
     assert result.code == 4
     data = json.loads(result.out)
     assert data["detail"] == "not_permitted" and data["apps"] is None
@@ -468,6 +468,6 @@ def test_site_show_denied_detail_json(env, denied_fc, cli):
 
 def test_single_team_permission_error_hint_names_owner(profile, fc, cli):
     fc.team_errors["team-acme"] = (403, fixture("error_permission.json"))
-    result = cli("bench", "list", "--team", "team-acme")
+    result = cli("bench-list", "--team", "team-acme")
     assert result.code == 4
     assert "Ask acme@example.com for access" in result.err

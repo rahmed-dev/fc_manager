@@ -13,7 +13,7 @@ import respx
 
 from fc_manager.api import client as client_module
 from fc_manager.api.client import READ_ONLY_METHODS, WRITE_METHODS
-from fc_manager.cli.app import NOUNS, app
+from fc_manager.cli.app import app
 from fc_manager.inventory import Inventory
 
 from .conftest import BASE, default_fake, fixture, save_profile
@@ -22,14 +22,14 @@ CANARY_KEY = "canaryKEY-7f3a9c"
 CANARY_SECRET = "canarySECRET-91be4d"
 
 COMMANDS = [
-    ["team", "list"],
-    ["bench", "list"],
-    ["site", "list"],
-    ["site", "list", "--bench", "ACME Prod"],
-    ["site", "show", "erp.acme.example.com"],
-    ["profile", "test", "work"],
-    ["bench", "show", "bench-1234"],
-    ["bench", "deploy", "bench-1234", "--all-apps", "--dry-run"],
+    ["team-list"],
+    ["bench-list"],
+    ["site-list"],
+    ["site-list", "--bench", "ACME Prod"],
+    ["site-show", "erp.acme.example.com"],
+    ["profile-test", "work"],
+    ["bench-show", "bench-1234"],
+    ["bench-deploy", "bench-1234", "--all-apps", "--dry-run"],
 ]
 
 FLAGS = [[], ["--debug"], ["--json"], ["--debug", "--json"]]
@@ -107,11 +107,11 @@ def test_canary_never_leaks_on_success(canary_profile, cli, fc, command, flags):
 # --- 6.2: allowlist walk --------------------------------------------------------------
 
 WALK = COMMANDS + [
-    ["site", "list", "--status", "update-available"],
-    ["site", "list", "--team", "ACME Corp"],
-    ["bench", "list", "--team", "team-beta"],
-    ["profile", "list"],
-    ["bench", "deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", "--no-wait"],
+    ["site-list", "--status", "update-available"],
+    ["site-list", "--team", "ACME Corp"],
+    ["bench-list", "--team", "team-beta"],
+    ["profile-list"],
+    ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", "--no-wait"],
 ]
 
 DEPLOY = "press.api.bench.deploy_and_update"
@@ -122,7 +122,7 @@ def posts(fake) -> list[str]:
 
 
 def sends_a_deploy(command: list[str]) -> bool:
-    return command[:2] == ["bench", "deploy"] and "--dry-run" not in command
+    return command[0] == "bench-deploy" and "--dry-run" not in command
 
 
 def test_walk_covers_every_command():
@@ -130,11 +130,9 @@ def test_walk_covers_every_command():
 
     root = typer.main.get_command(app)
     ctx = typer.Context(root)
-    walked = {(c[0], c[1]) for c in WALK} | {("profile", "add"), ("profile", "remove")}
-    for noun in NOUNS:
-        group = root.get_command(ctx, noun)
-        for verb in group.list_commands(typer.Context(group)):
-            assert (noun, verb) in walked, f"fcm {noun} {verb} is not in the allowlist walk"
+    walked = {c[0] for c in WALK} | {"profile-add", "profile-remove"}
+    for name in root.list_commands(ctx):
+        assert name in walked, f"fcm {name} is not in the allowlist walk"
 
 
 @pytest.mark.parametrize("command", WALK, ids=" ".join)
@@ -143,7 +141,7 @@ def test_every_command_uses_only_allowlisted_methods(env, cli, strict_fc, comman
     result = cli(*command)
     assert result.code == 0, result.err
     assert set(strict_fc.calls) <= READ_ONLY_METHODS | WRITE_METHODS
-    # Only `fcm bench deploy` (not a dry run) sends a POST, and only the deploy method.
+    # Only `fcm bench-deploy` (not a dry run) sends a POST, and only the deploy method.
     assert posts(strict_fc) == ([DEPLOY] if sends_a_deploy(command) else [])
 
 
@@ -156,9 +154,9 @@ def test_walk_detects_a_post_from_another_command(env, cli, strict_fc, monkeypat
         raise AssertionError("unreachable")
 
     monkeypatch.setattr(Inventory, "benches", benches_that_write)
-    cli("bench", "list")
+    cli("bench-list")
     assert posts(strict_fc) == [DEPLOY]
-    assert posts(strict_fc) != ([DEPLOY] if sends_a_deploy(["bench", "list"]) else [])
+    assert posts(strict_fc) != ([DEPLOY] if sends_a_deploy(["bench-list"]) else [])
 
 
 def test_strict_router_fails_on_a_method_off_the_allowlist(env, strict_fc):
@@ -192,9 +190,7 @@ def test_canary_never_leaks_on_deploy_errors(canary_profile, cli, flags, path):
 
     with respx.mock(base_url=BASE, assert_all_called=False) as router:
         router.route().mock(side_effect=handler)
-        result = cli(
-            "bench", "deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", *flags
-        )
+        result = cli("bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", *flags)
     assert result.code != 0
     assert len(fake.posts) == 1  # never retried
     for stream in (result.out, result.err):

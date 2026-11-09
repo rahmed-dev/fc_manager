@@ -23,13 +23,10 @@ from fc_manager.cli.common import (
     team_label,
     teams_phrase,
 )
+from fc_manager.cli.root import app
 from fc_manager.errors import NotFound, PermissionDenied, UsageError
 from fc_manager.inventory import Ambiguous, Bench, Fanout, Resolved, Site, resolve
 from fc_manager.output import Column
-
-team_app = typer.Typer(no_args_is_help=True, help="FC teams that the profile can reach.")
-bench_app = typer.Typer(no_args_is_help=True, help="Benches (FC release groups).")
-site_app = typer.Typer(no_args_is_help=True, help="Sites.")
 
 
 class SiteStatus(StrEnum):
@@ -76,7 +73,7 @@ def _show_partial_site(s: Session, site: Site, json_mode: bool) -> None:
 # --- team -----------------------------------------------------------------------------
 
 
-@team_app.command("list")
+@app.command("team-list", rich_help_panel="Team")
 def team_list(profile: ProfileOpt = None, json_mode: JsonOpt = False, debug: DebugOpt = False):
     """List every team that the profile can reach."""
     with session(profile, json_mode, debug) as s:
@@ -114,7 +111,7 @@ def _bench_json(bench: Bench) -> dict:
     return data
 
 
-@bench_app.command("list")
+@app.command("bench-list", rich_help_panel="Bench")
 def bench_list(
     team: TeamOpt = None,
     profile: ProfileOpt = None,
@@ -175,11 +172,11 @@ def _resolve_bench(s: Session, teams, query: str) -> Bench | None:
     close = ", ".join(_bench_label(b) for b in result.close_matches)
     raise NotFound(
         f"Bench {query!r} not found in {teams_phrase(teams)}",
-        hint=f"Close matches: {close}" if close else "Run: fcm bench list",
+        hint=f"Close matches: {close}" if close else "Run: fcm bench-list",
     )
 
 
-@site_app.command("list")
+@app.command("site-list", rich_help_panel="Site")
 def site_list(
     team: TeamOpt = None,
     bench: Annotated[
@@ -214,7 +211,7 @@ def site_list(
         raise_failures(result, teams)
 
 
-@site_app.command("show")
+@app.command("site-show", rich_help_panel="Site")
 def site_show(
     site: Annotated[
         str | None,
@@ -227,7 +224,7 @@ def site_show(
 ):
     """Show one site with its installed apps."""
     if site is None and not picker.is_interactive(json_mode):
-        raise UsageError("No site given", hint="Give the site name: fcm site show <site>")
+        raise UsageError("No site given", hint="Give the site name: fcm site-show <site>")
     with session(profile, json_mode, debug) as s:
         teams = scope_teams(s, team)
         result = s.inventory.sites(teams)
@@ -260,7 +257,7 @@ def site_show(
                 close = ", ".join(x.name for x in found.close_matches)
                 raise NotFound(
                     f"Site {site} not found in {teams_phrase(teams)}",
-                    hint=f"Close matches: {close}" if close else "Run: fcm site list",
+                    hint=f"Close matches: {close}" if close else "Run: fcm site-list",
                 )
 
         try:

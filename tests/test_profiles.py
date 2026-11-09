@@ -103,7 +103,7 @@ def test_profile_selection_order(env, monkeypatch):
 def test_no_profile_configured(env):
     with pytest.raises(UsageError) as info:
         credentials.resolve(None, config.load())
-    assert "fcm profile add" in info.value.hint
+    assert "fcm profile-add" in info.value.hint
 
 
 def test_unknown_profile(env):
@@ -133,7 +133,7 @@ def typed(monkeypatch):
 @respx.mock
 def test_add_valid_credentials(env, cli, interactive, typed, memkeyring):
     respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
-    result = cli("profile", "add", "work")
+    result = cli("profile-add", "work")
     assert result.code == 0, result.err
     assert "user@example.com" in result.out and "13 teams" in result.out
     assert config.load().default_profile == "work"
@@ -144,7 +144,7 @@ def test_add_valid_credentials(env, cli, interactive, typed, memkeyring):
 @respx.mock
 def test_add_rejected_credentials_stores_nothing(env, cli, interactive, typed, memkeyring):
     respx.get(method_url("press.api.account.get")).respond(401, json=fixture("error_auth.json"))
-    result = cli("profile", "add", "work")
+    result = cli("profile-add", "work")
     assert result.code == 3
     assert "FC dashboard" in result.err
     assert memkeyring.store == {}
@@ -153,7 +153,7 @@ def test_add_rejected_credentials_stores_nothing(env, cli, interactive, typed, m
 
 def test_add_duplicate_name_is_refused(env, cli, interactive, typed):
     save_profile("work")
-    result = cli("profile", "add", "work")
+    result = cli("profile-add", "work")
     assert result.code == 2
     assert "--replace" in result.err
 
@@ -162,7 +162,7 @@ def test_add_duplicate_name_is_refused(env, cli, interactive, typed):
 def test_add_replace_updates_credentials(env, cli, interactive, typed, memkeyring):
     save_profile("work", key="old-key-0000", secret="old-secret-0000")
     respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
-    result = cli("profile", "add", "work", "--replace")
+    result = cli("profile-add", "work", "--replace")
     assert result.code == 0, result.err
     assert credentials.load("work").api_secret == SECRET
 
@@ -173,27 +173,27 @@ def test_add_secret_is_never_a_cli_argument():
     from fc_manager.cli.app import app
 
     root = typer.main.get_command(app)
-    add = root.get_command(typer.Context(root), "profile").get_command(typer.Context(root), "add")
+    add = root.get_command(typer.Context(root), "profile-add")
     names = {opt for p in add.params for opt in getattr(p, "opts", [])}
     assert not any("secret" in n or "key" in n for n in names), names
 
 
 def test_add_rejects_http_base_url(env, cli, interactive, typed):
-    result = cli("profile", "add", "work", "--base-url", "http://example.com")
+    result = cli("profile-add", "work", "--base-url", "http://example.com")
     assert result.code == 2
     assert "HTTPS" in result.err
 
 
 def test_add_without_keyring(env, cli, interactive, typed, monkeypatch):
     monkeypatch.setattr(credentials, "keyring_usable", lambda backend=None: False)
-    result = cli("profile", "add", "work")
+    result = cli("profile-add", "work")
     assert result.code == 2
     assert credentials.ENV_KEY in result.err
     assert config.load().profiles == {}
 
 
 def test_add_needs_a_terminal(env, cli, typed):
-    result = cli("profile", "add", "work")
+    result = cli("profile-add", "work")
     assert result.code == 2
     assert "terminal" in result.err
 
@@ -204,7 +204,7 @@ def test_add_needs_a_terminal(env, cli, typed):
 def test_list_shows_names_and_default_without_credentials(env, cli):
     save_profile("work")
     save_profile("client", default=False)
-    result = cli("profile", "list")
+    result = cli("profile-list")
     assert result.code == 0
     assert "work" in result.out and "client" in result.out and "*" in result.out
     assert KEY not in result.out and SECRET not in result.out
@@ -212,19 +212,19 @@ def test_list_shows_names_and_default_without_credentials(env, cli):
 
 def test_list_json(env, cli):
     save_profile("work")
-    rows = json.loads(cli("profile", "list", "--json").out)
+    rows = json.loads(cli("profile-list", "--json").out)
     assert rows == [{"name": "work", "default": True, "base_url": BASE}]
 
 
 def test_list_empty(env, cli):
-    assert "No profiles" in cli("profile", "list").out
+    assert "No profiles" in cli("profile-list").out
 
 
 @respx.mock
 def test_test_reports_user_and_teams(env, cli):
     save_profile("work")
     respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
-    result = cli("profile", "test", "work")
+    result = cli("profile-test", "work")
     assert result.code == 0
     assert "user@example.com" in result.out
     assert "name-14" in result.out
@@ -234,15 +234,15 @@ def test_test_reports_user_and_teams(env, cli):
 def test_test_revoked_key_hints_replace(env, cli):
     save_profile("work")
     respx.get(method_url("press.api.account.get")).respond(401, json=fixture("error_auth.json"))
-    result = cli("profile", "test", "work")
+    result = cli("profile-test", "work")
     assert result.code == 3
-    assert "fcm profile add work --replace" in result.err
+    assert "fcm profile-add work --replace" in result.err
 
 
 def test_remove_with_confirmation(env, cli, interactive, monkeypatch, memkeyring):
     save_profile("work")
     monkeypatch.setattr(profile_cli, "_confirm", lambda q: True)
-    result = cli("profile", "remove", "work")
+    result = cli("profile-remove", "work")
     assert result.code == 0
     assert config.load().profiles == {}
     assert memkeyring.store == {}
@@ -251,7 +251,7 @@ def test_remove_with_confirmation(env, cli, interactive, monkeypatch, memkeyring
 def test_remove_cancelled_changes_nothing(env, cli, interactive, monkeypatch, memkeyring):
     save_profile("work")
     monkeypatch.setattr(profile_cli, "_confirm", lambda q: False)
-    result = cli("profile", "remove", "work")
+    result = cli("profile-remove", "work")
     assert result.code == 0
     assert "work" in config.load().profiles
     assert memkeyring.store
@@ -259,15 +259,15 @@ def test_remove_cancelled_changes_nothing(env, cli, interactive, monkeypatch, me
 
 def test_remove_non_interactive_needs_yes(env, cli, memkeyring):
     save_profile("work")
-    assert cli("profile", "remove", "work").code == 2
-    assert cli("profile", "remove", "work", "--yes").code == 0
+    assert cli("profile-remove", "work").code == 2
+    assert cli("profile-remove", "work", "--yes").code == 0
     assert config.load().profiles == {}
 
 
 def test_remove_moves_default(env, cli):
     save_profile("work")
     save_profile("client", default=False)
-    cli("profile", "remove", "work", "--yes")
+    cli("profile-remove", "work", "--yes")
     assert config.load().default_profile == "client"
 
 
@@ -283,4 +283,4 @@ def test_keyring_errors_are_usage_errors(env, monkeypatch):
 def test_httpx_is_not_called_for_list(env, cli, monkeypatch):
     save_profile("work")
     monkeypatch.setattr(httpx.Client, "send", lambda *a, **k: pytest.fail("no network"))
-    assert cli("profile", "list").code == 0
+    assert cli("profile-list").code == 0

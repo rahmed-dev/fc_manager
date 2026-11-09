@@ -1,7 +1,4 @@
-"""Root `fcm` command and the top-level error handler.
-
-Grammar: fcm <noun> <verb> [TARGET] [options]. Nouns are singular. No aliases.
-"""
+"""Entry point of `fcm` and the top-level error handler. Commands live in cli/root.py."""
 
 from __future__ import annotations
 
@@ -9,42 +6,11 @@ import sys
 import traceback
 
 import typer
-from typer.core import TyperGroup
 
-from fc_manager.cli import deploy, inventory, profile  # noqa: F401 - deploy registers bench commands
+from fc_manager.cli import deploy, inventory, menu, profile  # noqa: F401 - register commands
+from fc_manager.cli.root import NOUNS, READ_VERBS, WRITE_VERBS, app  # noqa: F401 - public names
 from fc_manager.errors import FcmError, UsageError
 from fc_manager.output import Output
-
-NOUNS = ("profile", "team", "bench", "site")
-READ_VERBS = frozenset({"list", "show", "add", "remove", "test"})
-WRITE_VERBS = frozenset({"deploy"})  # each one previews and asks for a typed confirmation
-PLURALS = {"profiles": "profile", "teams": "team", "benches": "bench", "sites": "site"}
-
-
-class FcmGroup(TyperGroup):
-    """Root group: turns a plural noun into a usage error with the right command."""
-
-    def resolve_command(self, ctx: typer.Context, args: list[str]):
-        if args and args[0] in PLURALS:
-            singular = PLURALS[args[0]]
-            raise UsageError(
-                f"No command '{args[0]}': nouns are singular",
-                hint=f"Use: fcm {singular} list",
-            )
-        return super().resolve_command(ctx, args)
-
-
-app = typer.Typer(
-    cls=FcmGroup,
-    no_args_is_help=True,
-    add_completion=False,
-    help="Explore Frappe Cloud teams, benches and sites, and deploy app updates to a bench.",
-    pretty_exceptions_enable=False,
-)
-app.add_typer(profile.app, name="profile")
-app.add_typer(inventory.team_app, name="team")
-app.add_typer(inventory.bench_app, name="bench")  # list (inventory), show and deploy (deploy)
-app.add_typer(inventory.site_app, name="site")
 
 
 def run(args: list[str]) -> int:

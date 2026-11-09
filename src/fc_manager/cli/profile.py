@@ -11,12 +11,11 @@ from fc_manager import config, credentials
 from fc_manager.api.client import DEFAULT_BASE_URL, FCClient, validate_base_url
 from fc_manager.cli import picker
 from fc_manager.cli.common import DebugOpt, JsonOpt, count, team_label
+from fc_manager.cli.root import app
 from fc_manager.errors import UsageError
 from fc_manager.inventory import Inventory
 from fc_manager.output import Column, Output
 from fc_manager.redact import Credentials
-
-app = typer.Typer(no_args_is_help=True, help="Manage FC credential profiles (one per FC login).")
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
@@ -50,7 +49,7 @@ def _require_profile(cfg: config.Config, name: str) -> config.Profile:
     return cfg.profiles[name]
 
 
-@app.command("add")
+@app.command("profile-add", rich_help_panel="Profile")
 def add(
     name: NameArg,
     base_url: Annotated[
@@ -70,7 +69,7 @@ def add(
     if name in cfg.profiles and not replace:
         raise UsageError(
             f"Profile {name} already exists",
-            hint=f"To change its credentials, run: fcm profile add {name} --replace",
+            hint=f"To change its credentials, run: fcm profile-add {name} --replace",
         )
     if not credentials.keyring_usable():
         raise UsageError(
@@ -78,7 +77,7 @@ def add(
         )
     if not picker.is_interactive(json_mode):
         raise UsageError(
-            "fcm profile add needs a terminal to read the secret",
+            "fcm profile-add needs a terminal to read the secret",
             hint="Run it in a terminal without --json. " + credentials.ENV_HINT,
         )
 
@@ -103,7 +102,7 @@ def add(
         )
 
 
-@app.command("list")
+@app.command("profile-list", rich_help_panel="Profile")
 def list_(json_mode: JsonOpt = False, debug: DebugOpt = False) -> None:
     """List profiles. Never shows keys or secrets."""
     out = Output(json_mode=json_mode)
@@ -121,11 +120,11 @@ def list_(json_mode: JsonOpt = False, debug: DebugOpt = False) -> None:
             for p in profiles
         ],
         summary=count(len(profiles), "profile"),
-        empty="No profiles. Run: fcm profile add <name>",
+        empty="No profiles. Run: fcm profile-add <name>",
     )
 
 
-@app.command("test")
+@app.command("profile-test", rich_help_panel="Profile")
 def test(name: NameArg, json_mode: JsonOpt = False, debug: DebugOpt = False) -> None:
     """Check a stored profile against FC and show the teams it reaches."""
     out = Output(json_mode=json_mode)
@@ -149,7 +148,7 @@ def test(name: NameArg, json_mode: JsonOpt = False, debug: DebugOpt = False) -> 
         out.message(f"  {team_label(team)}")
 
 
-@app.command("remove")
+@app.command("profile-remove", rich_help_panel="Profile")
 def remove(
     name: NameArg,
     yes: Annotated[bool, typer.Option("--yes", help="Do not ask for confirmation.")] = False,

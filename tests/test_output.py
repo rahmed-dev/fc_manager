@@ -67,11 +67,11 @@ def test_error_table_mode_shows_target_server_message_and_hint():
 
 def test_error_json_mode_has_error_kind_hint():
     o, out, err = make(json_mode=True)
-    o.error(NotFound("Site x not found", hint="Run: fcm site list"))
+    o.error(NotFound("Site x not found", hint="Run: fcm site-list"))
     payload = json.loads(err.getvalue())
     assert payload["error"] == "Site x not found"
     assert payload["kind"] == "not_found"
-    assert payload["hint"] == "Run: fcm site list"
+    assert payload["hint"] == "Run: fcm site-list"
     assert out.getvalue() == ""
 
 

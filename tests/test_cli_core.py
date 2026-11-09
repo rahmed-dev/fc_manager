@@ -15,7 +15,7 @@ from fc_manager.errors import UsageError
 
 @pytest.fixture
 def boom(monkeypatch):
-    """Make `fcm team list` raise an unexpected exception that holds a secret."""
+    """Make `fcm team-list` raise an unexpected exception that holds a secret."""
     from fc_manager.cli import inventory
 
     def explode(*_args, **_kwargs):
@@ -28,7 +28,7 @@ def test_unexpected_exception_exits_1_without_traceback(env, cli, boom):
     from fc_manager.redact import register
 
     register("secret-2222bbbb")
-    result = cli("team", "list")
+    result = cli("team-list")
     assert result.code == 1
     assert "Traceback" not in result.err
     assert "Unexpected error: RuntimeError" in result.err
@@ -40,14 +40,14 @@ def test_unexpected_exception_with_debug_shows_redacted_traceback(env, cli, boom
     from fc_manager.redact import register
 
     register("secret-2222bbbb")
-    result = cli("team", "list", "--debug")
+    result = cli("team-list", "--debug")
     assert result.code == 1
     assert "Traceback" in result.err
     assert "secret-2222bbbb" not in result.err
 
 
 def test_usage_error_from_parser_exits_2(env, cli):
-    result = cli("site", "list", "--status", "nonsense")
+    result = cli("site-list", "--status", "nonsense")
     assert result.code == 2
 
 
@@ -56,7 +56,7 @@ def test_usage_error_from_parser_exits_2(env, cli):
 
 @pytest.mark.parametrize(
     ("plural", "suggestion"),
-    [("sites", "fcm site list"), ("benches", "fcm bench list"), ("teams", "fcm team list")],
+    [("sites", "fcm site-list"), ("benches", "fcm bench-list"), ("teams", "fcm team-list")],
 )
 def test_plural_noun_suggests_singular_list(env, cli, plural, suggestion):
     result = cli(plural)
@@ -65,36 +65,67 @@ def test_plural_noun_suggests_singular_list(env, cli, plural, suggestion):
 
 
 def test_site_show_without_target_in_json_mode_exits_2(env, cli):
-    result = cli("site", "show", "--json")
+    result = cli("site-show", "--json")
     assert result.code == 2
     payload = json.loads(result.err)
     assert payload["kind"] == "usage"
     assert result.out == ""
 
 
-def test_every_command_is_noun_verb_with_a_fixed_verb():
+def _commands():
     root = typer.main.get_command(app)
     ctx = typer.Context(root)
-    assert sorted(root.list_commands(ctx)) == sorted(NOUNS)
-    for noun in NOUNS:
-        group = root.get_command(ctx, noun)
-        verbs = group.list_commands(typer.Context(group))
-        assert verbs, noun
-        for verb in verbs:
-            assert verb in READ_VERBS | WRITE_VERBS, f"fcm {noun} {verb}: verb not in the fixed set"
-            command = group.get_command(typer.Context(group), verb)
-            assert not hasattr(command, "list_commands"), f"fcm {noun} {verb} nests deeper"
+    return [(name, root.get_command(ctx, name)) for name in root.list_commands(ctx)]
+
+
+def test_every_command_is_one_noun_verb_word_with_a_fixed_verb():
+    names = [name for name, _ in _commands()]
+    assert sorted(names) == sorted(
+        [
+            "profile-add", "profile-list", "profile-test", "profile-remove",
+            "team-list", "bench-list", "bench-show", "bench-deploy", "site-list", "site-show",
+        ]
+    )  # fmt: skip
+    for name, command in _commands():
+        noun, _, verb = name.partition("-")
+        assert noun in NOUNS, name
+        assert verb in READ_VERBS | WRITE_VERBS, f"fcm {name}: verb not in the fixed set"
+        assert not hasattr(command, "list_commands"), f"fcm {name} is a group"
+        assert command.rich_help_panel == noun.capitalize(), name
 
 
 def test_shared_options_mean_the_same_everywhere():
-    root = typer.main.get_command(app)
-    ctx = typer.Context(root)
-    for noun in NOUNS:
-        group = root.get_command(ctx, noun)
-        for verb in group.list_commands(typer.Context(group)):
-            command = group.get_command(typer.Context(group), verb)
-            options = {opt for p in command.params for opt in getattr(p, "opts", [])}
-            assert "--json" in options and "--debug" in options, f"fcm {noun} {verb}"
+    for name, command in _commands():
+        options = {opt for p in command.params for opt in getattr(p, "opts", [])}
+        assert "--json" in options and "--debug" in options, f"fcm {name}"
+
+
+@pytest.mark.parametrize(
+    ("args", "suggestion"),
+    [
+        (["bench", "list", "--team", "acme"], "fcm bench-list"),
+        (["site", "show", "x.example.com"], "fcm site-show"),
+        (["profile", "add", "work"], "fcm profile-add"),
+    ],
+)
+def test_old_two_word_form_names_the_new_command(env, cli, args, suggestion):
+    result = cli(*args)
+    assert result.code == 2
+    assert suggestion in result.err
+
+
+def test_bare_noun_lists_its_commands(env, cli):
+    result = cli("bench")
+    assert result.code == 2
+    for name in ("fcm bench-list", "fcm bench-show", "fcm bench-deploy"):
+        assert name in result.err
+
+
+def test_help_groups_commands_by_noun(env, cli):
+    result = cli("--help")
+    assert result.code == 0
+    for panel in ("Profile", "Team", "Bench", "Site"):
+        assert panel in result.out
 
 
 # --- 3.4: picker ----------------------------------------------------------------------

@@ -345,7 +345,7 @@ class DeployService:
         return parse_build(data)
 
     def state(self, bench: Bench) -> DeployState:
-        """The current deploy state of the bench (for `fcm bench show`)."""
+        """The current deploy state of the bench (for `fcm bench-show`)."""
         status = self._call(bench, "press.api.bench.deploy_status", name=bench.name) or {}
         build = _str(status.get("candidate")) if isinstance(status, dict) else ""
         if build:
@@ -395,7 +395,7 @@ class DeployService:
                         step=step.label if step else None,
                         target=f"bench {bench.name}",
                         server_message=state.message or None,
-                        hint=f"Run: fcm bench show {bench.name}",
+                        hint=f"Run: fcm bench-show {bench.name}",
                     )
                 if state.stage == "finishing":
                     break
@@ -440,7 +440,7 @@ class DeployService:
                     + ", ".join(waiting)
                     + f" in {SITE_UPDATE_LIMIT_SECONDS // 60} minutes. Its result is not known.",
                     target=f"bench {bench.name}",
-                    hint=f"Check the site in the FC dashboard. Run: fcm bench show {bench.name}",
+                    hint=f"Check the site in the FC dashboard. Run: fcm bench-show {bench.name}",
                 )
             yield answered(
                 DeployState(

@@ -1,13 +1,14 @@
-"""`fcm bench show` and `fcm bench deploy`.
+"""`fcm bench-show` and `fcm bench-deploy`.
 
-`bench deploy` is the only command that changes FC. It walks: bench, app updates, sites
+`bench-deploy` is the only command that changes FC. It walks: bench, app updates, sites
 (none selected by default), preview, typed confirmation, deploy, progress, result.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from typing import Annotated
 
 import typer
@@ -32,7 +33,8 @@ from fc_manager.cli.common import (
     session,
     team_label,
 )
-from fc_manager.cli.inventory import _bench_json, _resolve_bench, bench_app
+from fc_manager.cli.inventory import _bench_json, _resolve_bench
+from fc_manager.cli.root import app
 from fc_manager.deploy import (
     AppUpdate,
     DeployInfo,
@@ -171,10 +173,10 @@ def _steps_table(state: DeployState, running: dict[str, str] | None = None) -> T
     return table
 
 
-# --- bench show -----------------------------------------------------------------------
+# --- bench-show -----------------------------------------------------------------------
 
 
-@bench_app.command("show")
+@app.command("bench-show", rich_help_panel="Bench")
 def bench_show(
     bench: Annotated[
         str | None,
@@ -187,78 +189,81 @@ def bench_show(
 ):
     """Show one bench: apps with updates, sites, and a running deploy."""
     if bench is None and not picker.is_interactive(json_mode):
-        raise UsageError("No bench given", hint="Give the bench: fcm bench show <bench>")
+        raise UsageError("No bench given", hint="Give the bench: fcm bench-show <bench>")
     with session(profile, json_mode, debug) as s:
-        target = _pick_bench(s, scope_teams(s, team), bench)
-        service = DeployService(s.client)
-        try:
-            info = service.info(target)
-            state = service.state(target) if info.busy else DeployState(stage="idle")
-        except FcmError as err:
-            raise _scoped(err, target) from err
+        show_bench(s, _pick_bench(s, scope_teams(s, team), bench))
 
-        if json_mode:
-            s.out.emit_json(
-                {
-                    "bench": _bench_json(target),
-                    "update_available": bool(info.updates or info.removed_apps),
-                    "apps": [_app_json(a) for a in info.apps],
-                    "removed_apps": info.removed_apps,
-                    "sites": [{"name": x.name, "server": x.server} for x in info.sites],
-                    "last_build": info.last_build or None,
-                    "deploy": _state_json(state),
-                }
-            )
-            return
-        deploy_text = STAGE_TEXT[state.stage]
-        if state.current_step:
-            deploy_text += f" (now: {state.current_step.label})"
-        s.out.detail(
-            f"Bench {target.title or target.name}",
-            [
-                ("Team", team_label(target.team)),
-                ("Bench", f"{target.title} ({target.name})"),
-                ("Version", target.version),
-                ("Status", target.status),
-                ("Updates", count(len(info.updates), "app") if info.updates else "none"),
-                ("Deploy", deploy_text),
-            ],
+
+def show_bench(s: Session, target: Bench) -> None:
+    """The work of `bench-show` for a known bench. The menu calls it too."""
+    json_mode = s.out.json_mode
+    service = DeployService(s.client)
+    try:
+        info = service.info(target)
+        state = service.state(target) if info.busy else DeployState(stage="idle")
+    except FcmError as err:
+        raise _scoped(err, target) from err
+
+    if json_mode:
+        s.out.emit_json(
+            {
+                "bench": _bench_json(target),
+                "update_available": bool(info.updates or info.removed_apps),
+                "apps": [_app_json(a) for a in info.apps],
+                "removed_apps": info.removed_apps,
+                "sites": [{"name": x.name, "server": x.server} for x in info.sites],
+                "last_build": info.last_build or None,
+                "deploy": _state_json(state),
+            }
         )
+        return
+    deploy_text = STAGE_TEXT[state.stage]
+    if state.current_step:
+        deploy_text += f" (now: {state.current_step.label})"
+    s.out.detail(
+        f"Bench {target.title or target.name}",
+        [
+            ("Team", team_label(target.team)),
+            ("Bench", f"{target.title} ({target.name})"),
+            ("Version", target.version),
+            ("Status", target.status),
+            ("Updates", count(len(info.updates), "app") if info.updates else "none"),
+            ("Deploy", deploy_text),
+        ],
+    )
+    s.out.message("")
+    s.out.table(
+        [
+            Column("App", lambda a: a.app),
+            Column("Current", lambda a: a.current_version),
+            Column("Update", lambda a: a.next_version if a.has_update else ""),
+            Column("Branch", lambda a: a.branch),
+            Column("Note", lambda a: _app_note(a) if a.has_update else ""),
+        ],
+        info.apps,
+        json_rows=[],
+        summary=f"{count(len(info.apps), 'app')}, {count(len(info.updates), 'update')}",
+        empty="FC reports no apps for this bench.",
+    )
+    if info.removed_apps:
+        s.out.message(f"Removed apps (go away at the next deploy): {', '.join(info.removed_apps)}")
+    s.out.message("")
+    s.out.table(
+        [Column("Site", lambda x: x.name), Column("Server", lambda x: x.server)],
+        info.sites,
+        json_rows=[],
+        summary=f"{count(len(info.sites), 'site')} on this bench",
+        empty="No active site on this bench.",
+    )
+    if state.steps:
         s.out.message("")
-        s.out.table(
-            [
-                Column("App", lambda a: a.app),
-                Column("Current", lambda a: a.current_version),
-                Column("Update", lambda a: a.next_version if a.has_update else ""),
-                Column("Branch", lambda a: a.branch),
-                Column("Note", lambda a: _app_note(a) if a.has_update else ""),
-            ],
-            info.apps,
-            json_rows=[],
-            summary=f"{count(len(info.apps), 'app')}, {count(len(info.updates), 'update')}",
-            empty="FC reports no apps for this bench.",
-        )
-        if info.removed_apps:
-            s.out.message(
-                f"Removed apps (go away at the next deploy): {', '.join(info.removed_apps)}"
-            )
-        s.out.message("")
-        s.out.table(
-            [Column("Site", lambda x: x.name), Column("Server", lambda x: x.server)],
-            info.sites,
-            json_rows=[],
-            summary=f"{count(len(info.sites), 'site')} on this bench",
-            empty="No active site on this bench.",
-        )
-        if state.steps:
-            s.out.message("")
-            s.out.console.print(_steps_table(state))
+        s.out.console.print(_steps_table(state))
 
 
-# --- bench deploy ---------------------------------------------------------------------
+# --- bench-deploy ---------------------------------------------------------------------
 
 
-def _choose_apps(s: Session, info: DeployInfo, *, back: bool) -> list[str]:
+def _choose_apps(s: Session, info: DeployInfo, *, back: bool, path: str | None = None) -> list[str]:
     if not info.updates:
         return []
     while True:
@@ -267,13 +272,14 @@ def _choose_apps(s: Session, info: DeployInfo, *, back: bool) -> list[str]:
             [(_app_label(a), a.app) for a in info.updates],
             selected=True,
             back=back,
+            path=path,
         )
         if chosen or info.removed_apps:
             return chosen
         s.out.message("Select at least one app to deploy.")
 
 
-def _choose_sites(s: Session, info: DeployInfo) -> list[str]:
+def _choose_sites(s: Session, info: DeployInfo, *, path: str | None = None) -> list[str]:
     if not info.sites:
         s.out.message("No active site on this bench: the deploy is bench only.")
         return []
@@ -282,6 +288,7 @@ def _choose_sites(s: Session, info: DeployInfo) -> list[str]:
         [(x.name, x.name) for x in info.sites],
         selected=False,
         back=True,
+        path=path,
     )
 
 
@@ -460,7 +467,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
     return final
 
 
-@bench_app.command("deploy")
+@app.command("bench-deploy", rich_help_panel="Bench")
 def bench_deploy(
     bench: Annotated[
         str | None,
@@ -497,107 +504,161 @@ def bench_deploy(
         raise UsageError("Use --app or --all-apps, not both")
     if not interactive:
         if bench is None:
-            raise UsageError("No bench given", hint="Give the bench: fcm bench deploy <bench>")
+            raise UsageError("No bench given", hint="Give the bench: fcm bench-deploy <bench>")
         if not app and not all_apps:
             raise UsageError(
                 "No app selected", hint="Use --app <app> (repeat for more) or --all-apps."
             )
 
+    options = DeployOptions(
+        apps=list(app) if app else None,
+        all_apps=all_apps,
+        sites=list(site) if site else None,
+        confirm=confirm,
+        dry_run=dry_run,
+        no_wait=no_wait,
+    )
     with session(profile, json_mode, debug) as s:
         teams = scope_teams(s, team)
-        service = DeployService(s.client)
-        picked = bench is None
         target = _pick_bench(s, teams, bench)
         if not interactive and not dry_run and confirm != target.name:
             _confirm(s, DeployPlan(target, [], [], [], ""), confirm)  # raises: no write yet
+        repick = None
+        if bench is None:  # Esc on the app step goes back to the bench step of the walk
 
-        while True:  # the walk; Esc on the app step goes back to the bench step
-            try:
-                info = service.info(target)
-            except FcmError as err:
-                raise _scoped(err, target) from err
-            if info.busy:
-                raise UsageError(
-                    f"A deploy is already running on bench {target.title or target.name}",
-                    target=f"bench {target.name}",
-                    hint=f"Run: fcm bench show {target.name}",
-                )
-            if info.nothing_to_deploy:
-                if json_mode:
-                    s.out.emit_json({"bench": target.name, "status": "up_to_date"})
-                else:
-                    s.out.message(
-                        f"Bench {target.title or target.name} is up to date. Nothing to deploy."
-                    )
-                return
-            if not interactive:
-                plan = service.plan(info, None if all_apps else app, site or [])
-                break
-            try:
-                apps = (
-                    None if all_apps else list(app) if app else _choose_apps(s, info, back=picked)
-                )
-            except picker.GoBack:
-                target = _pick_bench(s, teams, None, start_team=target.team)
-                continue
-            try:
-                sites = list(site) if site else _choose_sites(s, info)
-            except picker.GoBack:
-                continue  # back to the app step: info is read again, still one bench
-            plan = service.plan(info, apps, sites)
-            break
+            def repick(current: Bench) -> Bench:
+                return _pick_bench(s, teams, None, start_team=current.team)
 
-        if dry_run:
+        deploy_bench(s, target, options, repick=repick)
+
+
+@dataclass(frozen=True)
+class DeployOptions:
+    apps: list[str] | None = None  # None: not given (pick on a terminal)
+    all_apps: bool = False
+    sites: list[str] | None = None  # None: not given (pick on a terminal; bench only in a script)
+    confirm: str | None = None
+    dry_run: bool = False
+    no_wait: bool = False
+
+
+class WatchStopped(Exception):  # noqa: N818 - a signal, not an error
+    """Ctrl+C stopped the watch in the menu. The deploy continues on FC."""
+
+
+def deploy_bench(
+    s: Session,
+    target: Bench,
+    opts: DeployOptions,
+    *,
+    repick: Callable[[Bench], Bench] | None = None,
+    in_menu: bool = False,
+    path: str | None = None,
+) -> None:
+    """The work of `bench-deploy` for a known bench. The menu calls it too.
+
+    Esc on the app step: with `repick`, pick another bench; in the menu, raise
+    picker.GoBack to the menu. Ctrl+C in the watch: exit 130, or WatchStopped in the menu."""
+    json_mode = s.out.json_mode
+    interactive = s.interactive
+    app, all_apps, site, confirm = opts.apps, opts.all_apps, opts.sites, opts.confirm
+    service = DeployService(s.client)
+    back = repick is not None or in_menu
+    while True:  # the walk; Esc on the app step goes back to the bench step
+        try:
+            info = service.info(target)
+        except FcmError as err:
+            raise _scoped(err, target) from err
+        if info.busy:
+            raise UsageError(
+                f"A deploy is already running on bench {target.title or target.name}",
+                target=f"bench {target.name}",
+                hint=f"Run: fcm bench-show {target.name}",
+            )
+        if info.nothing_to_deploy:
             if json_mode:
-                s.out.emit_json({"dry_run": True, "plan": _plan_json(s, plan)})
+                s.out.emit_json({"bench": target.name, "status": "up_to_date"})
             else:
-                _preview(s, plan)
-                s.out.message("Dry run: nothing was sent to FC.")
+                s.out.message(
+                    f"Bench {target.title or target.name} is up to date. Nothing to deploy."
+                )
             return
+        if not interactive:
+            plan = service.plan(info, None if all_apps else app, site or [])
+            break
+        try:
+            apps = (
+                None
+                if all_apps
+                else list(app)
+                if app
+                else _choose_apps(s, info, back=back, path=path)
+            )
+        except picker.GoBack:
+            if repick is None:
+                raise
+            target = repick(target)
+            continue
+        try:
+            sites = list(site) if site else _choose_sites(s, info, path=path)
+        except picker.GoBack:
+            continue  # back to the app step: info is read again, still one bench
+        plan = service.plan(info, apps, sites)
+        break
 
-        if not json_mode:
+    if opts.dry_run:
+        if json_mode:
+            s.out.emit_json({"dry_run": True, "plan": _plan_json(s, plan)})
+        else:
             _preview(s, plan)
-        _confirm(s, plan, confirm)
+            s.out.message("Dry run: nothing was sent to FC.")
+        return
 
-        try:
-            ref = service.start(plan)  # the only write
-        except FcmError as err:
-            raise _scoped(err, target) from err
-        if json_mode:
-            s.out.emit_json_line({"event": "accepted", "ref": ref, "plan": _plan_json(s, plan)})
-        else:
-            s.out.message(f"FC accepted the deploy ({ref}).")
-        if no_wait:
-            s.out.message(f"Follow it with: fcm bench show {target.name}")
-            return
+    if not json_mode:
+        _preview(s, plan)
+    _confirm(s, plan, confirm)
 
-        try:
-            final = _watch(s, service, plan)
-        except KeyboardInterrupt:
-            s.out.message("")
-            s.out.message(
-                f"Stopped watching. The deploy continues on FC. Run: fcm bench show {target.name}"
-            )
-            raise typer.Exit(130) from None
-        except DeployFailed as err:
-            raise _scoped(err, target) from err
-        except FcmError as err:
-            raise _scoped(err, target) from err
+    try:
+        ref = service.start(plan)  # the only write
+    except FcmError as err:
+        raise _scoped(err, target) from err
+    if json_mode:
+        s.out.emit_json_line({"event": "accepted", "ref": ref, "plan": _plan_json(s, plan)})
+    else:
+        s.out.message(f"FC accepted the deploy ({ref}).")
+    if opts.no_wait:
+        s.out.message(f"Follow it with: fcm bench-show {target.name}")
+        return
 
-        if json_mode:
-            s.out.emit_json_line({"event": "result", **_state_json(final)})
-        else:
-            s.out.message("")
-            s.out.detail(
-                "Deploy finished",
-                [
-                    ("Bench", f"{target.title} ({target.name})"),
-                    ("Apps", ", ".join(f"{a.app} {a.next_version}" for a in plan.apps) or "none"),
-                    (
-                        "Sites",
-                        "Bench only: no site is updated"
-                        if plan.bench_only
-                        else ", ".join(f"{n} (updated)" for n, _ in final.sites),
-                    ),
-                ],
-            )
+    try:
+        final = _watch(s, service, plan)
+    except KeyboardInterrupt:
+        s.out.message("")
+        s.out.message(
+            f"Stopped watching. The deploy continues on FC. Run: fcm bench-show {target.name}"
+        )
+        if in_menu:
+            raise WatchStopped from None
+        raise typer.Exit(130) from None
+    except DeployFailed as err:
+        raise _scoped(err, target) from err
+    except FcmError as err:
+        raise _scoped(err, target) from err
+
+    if json_mode:
+        s.out.emit_json_line({"event": "result", **_state_json(final)})
+    else:
+        s.out.message("")
+        s.out.detail(
+            "Deploy finished",
+            [
+                ("Bench", f"{target.title} ({target.name})"),
+                ("Apps", ", ".join(f"{a.app} {a.next_version}" for a in plan.apps) or "none"),
+                (
+                    "Sites",
+                    "Bench only: no site is updated"
+                    if plan.bench_only
+                    else ", ".join(f"{n} (updated)" for n, _ in final.sites),
+                ),
+            ],
+        )

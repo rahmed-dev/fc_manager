@@ -118,7 +118,7 @@ def map_response_error(
             f"FC rejected the credentials {'of' if profile else 'in'} {who}",
             target=f"profile {profile}" if profile else target,
             hint=(
-                f"Make a new API key in the FC dashboard, then run: fcm profile add {profile} "
+                f"Make a new API key in the FC dashboard, then run: fcm profile-add {profile} "
                 "--replace"
                 if profile
                 else "Check FCM_API_KEY and FCM_API_SECRET."

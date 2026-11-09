@@ -77,3 +77,20 @@ def test_ask_text_cancel_exits_2(monkeypatch):
         picker.ask_text("Type the bench title")
     assert info.value.exit_code == 2
     assert "Nothing was sent to FC" in info.value.message
+
+
+def test_path_line_prints_above_the_prompt(monkeypatch):
+    printed = []
+    monkeypatch.setattr(picker.questionary, "print", lambda text, style=None: printed.append(text))
+
+    class Question:
+        def ask(self):
+            printed.append("<prompt>")
+            return 0
+
+    monkeypatch.setattr(picker.questionary, "select", lambda *a, **k: Question())
+    assert picker.choose("Action", [("Show", "show")], path="work > ACME > ACME Prod") == "show"
+    assert printed == ["work > ACME > ACME Prod", "<prompt>"]
+    printed.clear()
+    picker.choose("Action", [("Show", "show")])
+    assert printed == ["<prompt>"]

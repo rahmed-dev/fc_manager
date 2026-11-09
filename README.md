@@ -3,7 +3,7 @@
 `fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
 all the teams that your FC login can reach, and to deploy app updates to a bench.
 
-Only one command changes FC: `fcm bench deploy`. It shows a preview of the target and the
+Only one command changes FC: `fcm bench-deploy`. It shows a preview of the target and the
 changes, and starts nothing until you type the bench title. Every other command is
 read-only.
 
@@ -30,7 +30,7 @@ every team that the login is a member of. You do not list teams yourself; `fcm` 
 2. Add the profile. `fcm` asks for the key, and then for the secret in a hidden prompt:
 
    ```bash
-   fcm profile add work
+   fcm profile-add work
    ```
 
    `fcm` checks the key with FC before it saves it, and prints your FC user and the number
@@ -39,10 +39,10 @@ every team that the login is a member of. You do not list teams yourself; `fcm` 
 Other profile commands:
 
 ```bash
-fcm profile list                  # names, default marker, base URL (never credentials)
-fcm profile test work             # check the key with FC, show the teams
-fcm profile add work --replace    # give a profile a new key
-fcm profile remove work           # asks for confirmation; --yes skips the question
+fcm profile-list                  # names, default marker, base URL (never credentials)
+fcm profile-test work             # check the key with FC, show the teams
+fcm profile-add work --replace    # give a profile a new key
+fcm profile-remove work           # asks for confirmation; --yes skips the question
 ```
 
 The first profile you add becomes the default. To use another profile for one command,
@@ -50,21 +50,23 @@ pass `--profile <name>` or set `FCM_PROFILE`.
 
 ## Commands
 
-Every command has the form `fcm <noun> <verb> [TARGET] [options]`. Nouns are singular
-(`profile`, `team`, `bench`, `site`). There are no aliases: `fcm sites` tells you to use
-`fcm site list`.
+Every command is one word, `fcm <noun>-<verb> [TARGET] [options]`, as in Frappe `bench
+new-site`. A space always separates the command from an argument or an option. Nouns are
+singular (`profile`, `team`, `bench`, `site`). There are no aliases: `fcm sites` and an old
+two-word form (`site list`) tell you to use `fcm site-list`, and send nothing to FC.
+`fcm --help` lists the commands in groups: Profile, Team, Bench, Site.
 
 ```bash
-fcm team list                                  # every team your login reaches
-fcm bench list                                 # benches (FC release groups) in all teams
-fcm bench list --team "ACME Corp"              # one team, by title or FC name
-fcm site list                                  # sites in all teams
-fcm site list --bench "ACME Prod"              # sites on one bench, by title or FC name
-fcm site list --status update-available        # active, inactive, broken, trial, update-available
-fcm site show erp.acme.com                     # one site with its installed apps
-fcm site show                                  # on a terminal: pick the site from a list
-fcm bench show "ACME Prod"                     # apps with updates, sites, a running deploy
-fcm bench deploy "ACME Prod"                   # deploy app updates (see below)
+fcm team-list                                  # every team your login reaches
+fcm bench-list                                 # benches (FC release groups) in all teams
+fcm bench-list --team "ACME Corp"              # one team, by title or FC name
+fcm site-list                                  # sites in all teams
+fcm site-list --bench "ACME Prod"              # sites on one bench, by title or FC name
+fcm site-list --status update-available        # active, inactive, broken, trial, update-available
+fcm site-show erp.acme.com                     # one site with its installed apps
+fcm site-show                                  # on a terminal: pick the site from a list
+fcm bench-show "ACME Prod"                     # apps with updates, sites, a running deploy
+fcm bench-deploy "ACME Prod"                   # deploy app updates (see below)
 ```
 
 Options that work on every command:
@@ -82,9 +84,9 @@ owner email (teams only), then the title. Case does not matter for emails and ti
 
 **Team labels.** Many FC teams keep the default title "Parent Team". When 2 or more teams
 share a title, `fcm` shows each team's owner email instead, in tables, pickers and errors.
-`fcm team list` shows the id, the title and the owner of every team.
+`fcm team-list` shows the id, the title and the owner of every team.
 
-**Picker.** On a terminal, when the target is missing (`fcm site show`) or a title matches
+**Picker.** On a terminal, when the target is missing (`fcm site-show`) or a title matches
 more than one item (two benches called "Prod"), `fcm` shows a list you can filter by typing.
 With `--json`, or when the output goes to a pipe or a script, `fcm` never prompts: it exits
 with code 2 and lists the candidates.
@@ -94,13 +96,33 @@ your role in a client team does not allow it), `fcm` still shows the results fro
 teams, names the failed team, and exits with code 7.
 
 **Limited roles.** In a client team, your role may allow FC to list a site but not show its
-details. `fcm site show` then shows what the site list already gave (team, bench, status,
+details. `fcm site-show` then shows what the site list already gave (team, bench, status,
 version, region, update), says that details and apps are not permitted for your role, names
 the team owner to ask, and exits with code 4.
 
+### Menu: pick the bench once, then choose what to do
+
+Run `fcm` with no command on a terminal to open the menu:
+
+1. **Team**: pick a team (skipped when your login reaches one team only).
+2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
+3. **Action**: "Show bench (bench-show)", "Deploy app updates (bench-deploy)", "Pick another
+   bench", or "Quit".
+
+Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`.
+Each action runs the same code as its command, so a deploy shows the same preview and asks
+for the same typed bench title. After an action ends, also with an error or a cancelled
+deploy, the action menu of the same bench opens again.
+
+Esc goes back one step: action menu to bench, bench to team, team out of `fcm`. Esc at the
+app step of a deploy goes back to the action menu. Ctrl+C at a menu prompt ends `fcm` (exit
+130). Ctrl+C during a deploy watch stops the watch only, and the action menu opens again.
+`fcm --profile NAME` opens the menu with that profile. Without a terminal, `fcm` prints the
+help.
+
 ### Deploy app updates to a bench
 
-`fcm bench deploy` does what the FC dashboard deploy dialog does. On a terminal it walks
+`fcm bench-deploy` does what the FC dashboard deploy dialog does. On a terminal it walks
 you through these steps:
 
 1. **Team, then bench.** Give the bench by name or title, or pick it: first the team
@@ -114,16 +136,16 @@ you through these steps:
    version, removed apps, and the sites or "Bench only".
 5. **Confirm.** Type the bench title exactly. Any other input cancels, and nothing is sent.
 6. **Progress.** `fcm` follows the build step by step until it ends. Ctrl+C stops the
-   watch only: the deploy continues on FC. Run `fcm bench show <bench>` to look again.
+   watch only: the deploy continues on FC. Run `fcm bench-show <bench>` to look again.
 
 Esc goes back one step. When FC reports no update, or a deploy is already running on the
 bench, `fcm` says so and sends nothing.
 
 ```bash
-fcm bench deploy --dry-run                              # pick team and bench, preview only
-fcm bench deploy bench-1234 --app erpnext --app hrms \
+fcm bench-deploy --dry-run                              # pick team and bench, preview only
+fcm bench-deploy bench-1234 --app erpnext --app hrms \
     --site erp.acme.com --confirm bench-1234           # in a script
-fcm bench deploy bench-1234 --all-apps --confirm bench-1234 --no-wait --json
+fcm bench-deploy bench-1234 --all-apps --confirm bench-1234 --no-wait --json
 ```
 
 Without a terminal (a script, a pipe or `--json`), `fcm` never prompts. You must give the
@@ -155,13 +177,13 @@ message and stops. Use the FC dashboard for those cases.
   Keychain, Windows Credential Manager, or the Secret Service on Linux). It never writes a
   secret to a plain file.
 - **No keyring?** On a host with no secure keyring (for example a headless Linux server),
-  `fcm profile add` refuses to store anything. Set the credentials in the environment
+  `fcm profile-add` refuses to store anything. Set the credentials in the environment
   instead:
 
   ```bash
   export FCM_API_KEY=...       # both variables are needed
   export FCM_API_SECRET=...
-  fcm team list
+  fcm team-list
   ```
 
   When both variables are set, they take precedence over the keyring for that run.
@@ -174,12 +196,12 @@ message and stops. Use the FC dashboard for those cases.
 - **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
 - **Allowlists.** The HTTP client has a fixed allowlist of read-only FC API methods (GET)
   and a separate write allowlist with one method, `press.api.bench.deploy_and_update`
-  (POST). Only `fcm bench deploy` uses the write path. A call to any other method fails
+  (POST). Only `fcm bench-deploy` uses the write path. A call to any other method fails
   inside `fcm` before any request goes out. The generic FC document read
   (`press.api.client.get`) is allowed for the deploy build doctype only.
 - **No retry of a write.** A deploy request is sent one time only. When FC does not
   confirm it (a timeout or a server error), `fcm` says that the result on FC is not known
-  and tells you to run `fcm bench show`. A retry could start a second deploy.
+  and tells you to run `fcm bench-show`. A retry could start a second deploy.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
 
@@ -198,7 +220,7 @@ git-ignored `.env` file:
 cp .env.example .env
 chmod 600 .env          # bin/fcm-dev refuses to run otherwise
 $EDITOR .env            # fill in FCM_API_KEY and FCM_API_SECRET
-./bin/fcm-dev team list
+./bin/fcm-dev team-list
 ```
 
 `bin/fcm-dev` runs `uv run --env-file .env fcm ...`: uv puts the values into the

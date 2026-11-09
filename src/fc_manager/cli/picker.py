@@ -21,6 +21,10 @@ MAX_LISTED = 20
 _BACK = object()
 
 
+class Cancelled(UsageError):
+    """The user pressed Ctrl+C at a prompt (exit 2 in a direct command)."""
+
+
 class GoBack(Exception):  # noqa: N818 - a signal, not an error
     """The user pressed Esc to go back one step of a walk."""
 
@@ -45,8 +49,21 @@ def is_interactive(json_mode: bool) -> bool:
         return False
 
 
-def choose(prompt: str, options: Sequence[tuple[str, T]], *, back: bool = False) -> T:
-    """Show a type-to-filter list. Ctrl+C exits with code 2. With `back`, Esc raises GoBack."""
+def show_path(path: str | None) -> None:
+    """Print the target path (profile > team > bench) above a prompt."""
+    if path:
+        questionary.print(path, style="fg:ansibrightblack")
+
+
+def choose(
+    prompt: str,
+    options: Sequence[tuple[str, T]],
+    *,
+    back: bool = False,
+    path: str | None = None,
+) -> T:
+    """Show a type-to-filter list. Ctrl+C exits with code 2. With `back`, Esc raises GoBack.
+    With `path`, the target path prints above the prompt."""
     choices = [
         questionary.Choice(title=label, value=index) for index, (label, _) in enumerate(options)
     ]
@@ -60,11 +77,12 @@ def choose(prompt: str, options: Sequence[tuple[str, T]], *, back: bool = False)
     )
     if back:
         _bind_back(question)
+    show_path(path)
     answer = question.ask()
     if answer is _BACK:
         raise GoBack
     if answer is None:
-        raise UsageError("Cancelled, nothing done")
+        raise Cancelled("Cancelled, nothing done")
     return options[answer][1]
 
 
@@ -74,6 +92,7 @@ def choose_many(
     *,
     selected: bool,
     back: bool = True,
+    path: str | None = None,
 ) -> list[T]:
     """Show a multi-select list. `selected` sets the default of every option.
 
@@ -92,11 +111,12 @@ def choose_many(
     )
     if back:
         _bind_back(question)
+    show_path(path)
     answer = question.ask()
     if answer is _BACK:
         raise GoBack
     if answer is None:
-        raise UsageError("Cancelled, nothing done")
+        raise Cancelled("Cancelled, nothing done")
     return [options[index][1] for index in answer]
 
 

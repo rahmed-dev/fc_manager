@@ -78,7 +78,7 @@ def load(profile: str) -> Credentials:
         raise UsageError(
             f"No credentials in the keyring for profile {profile}",
             target=f"profile {profile}",
-            hint=f"Run: fcm profile add {profile} --replace",
+            hint=f"Run: fcm profile-add {profile} --replace",
         )
     try:
         data = json.loads(value)
@@ -86,7 +86,7 @@ def load(profile: str) -> Credentials:
     except (ValueError, KeyError, TypeError) as exc:
         raise UsageError(
             f"The keyring entry for profile {profile} is damaged",
-            hint=f"Run: fcm profile add {profile} --replace",
+            hint=f"Run: fcm profile-add {profile} --replace",
         ) from exc
 
 
@@ -129,7 +129,7 @@ def resolve(profile_option: str | None, config: Config) -> ActiveProfile:
         known = ", ".join(sorted(config.profiles)) or "none"
         raise UsageError(
             f"Profile {name} does not exist (profiles: {known})",
-            hint=f"Run: fcm profile add {name}",
+            hint=f"Run: fcm profile-add {name}",
         )
 
     env = env_credentials()
@@ -138,7 +138,7 @@ def resolve(profile_option: str | None, config: Config) -> ActiveProfile:
         return ActiveProfile(label=name or "env", base_url=base_url, credentials=env, from_env=True)
 
     if not name:
-        raise UsageError("No profile is set up", hint="Run: fcm profile add <name>")
+        raise UsageError("No profile is set up", hint="Run: fcm profile-add <name>")
     profile = config.profiles[name]
     return ActiveProfile(
         label=name, base_url=profile.base_url, credentials=load(name), from_env=False

@@ -114,7 +114,7 @@ def test_auth_error_hint_names_profile():
     respx.get(method_url("press.api.account.get")).respond(401, json=fixture("error_auth.json"))
     with pytest.raises(AuthError) as info:
         make_client().call("press.api.account.get")
-    assert info.value.hint and "fcm profile add work --replace" in info.value.hint
+    assert info.value.hint and "fcm profile-add work --replace" in info.value.hint
     assert info.value.target == "profile work"
 
 
@@ -205,7 +205,7 @@ def test_redirect_to_new_host_is_a_usage_error_with_the_fix():
     with pytest.raises(UsageError) as info:
         make_client(base_url=old).call("press.api.account.get")
     assert "cloud.frappe.io" in info.value.message
-    assert "fcm profile add work --base-url https://cloud.frappe.io --replace" in info.value.hint
+    assert "fcm profile-add work --base-url https://cloud.frappe.io --replace" in info.value.hint
     assert route.call_count == 1  # not retried
     assert not new_route.called  # the credentials never followed the redirect
 
@@ -315,7 +315,7 @@ def test_write_is_never_retried_and_result_is_unknown(outcome):
             make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
         assert route.call_count == 1
     assert "not known" in info.value.message
-    assert info.value.hint == "Run: fcm bench show bench-1"
+    assert info.value.hint == "Run: fcm bench-show bench-1"
     assert info.value.exit_code == 6
 
 

@@ -148,7 +148,7 @@ class FCClient:
         if not team:
             raise MethodNotAllowed(f"A write needs a team: {method}")
         bench = body.get("name")
-        hint = f"Run: fcm bench show {bench}" if bench else "Check the FC dashboard."
+        hint = f"Run: fcm bench-show {bench}" if bench else "Check the FC dashboard."
         try:
             return self._send("POST", method, team, body=body)
         except NetworkError as exc:
@@ -231,7 +231,7 @@ class FCClient:
         if new is not None and new.host and new.host != self.host:
             new_base = f"{new.scheme}://{new.host}"
             if self.profile:
-                hint = f"Run: fcm profile add {self.profile} --base-url {new_base} --replace"
+                hint = f"Run: fcm profile-add {self.profile} --base-url {new_base} --replace"
             else:
                 hint = f"Use a profile with --base-url {new_base}, or update fcm."
             return UsageError(
