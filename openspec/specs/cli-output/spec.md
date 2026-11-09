@@ -159,3 +159,10 @@ The system SHALL turn off color when stdout is not a terminal or when `NO_COLOR`
 #### Scenario: Piped output
 - **WHEN** the user pipes `fcm site-list` to another program
 - **THEN** the output contains no color escape codes
+
+### Requirement: Version option
+The system SHALL provide `fcm --version`. It SHALL print `fcm` and the installed version, and exit with code 0. It SHALL read no credentials and send no request to FC.
+
+#### Scenario: Version
+- **WHEN** the user runs `fcm --version` with version 1.0.0 installed
+- **THEN** the system prints `fcm 1.0.0` and exits with code 0, with no FC request
