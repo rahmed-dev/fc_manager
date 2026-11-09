@@ -1,0 +1,5 @@
+{
+  "exc_type": "PermissionError",
+  "exception": "frappe.exceptions.PermissionError: Not Permitted",
+  "_server_messages": "[\"{\\\"message\\\": \\\"<strong>Not Permitted</strong>\\\"}\"]"
+}

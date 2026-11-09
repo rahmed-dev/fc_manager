@@ -1,0 +1,58 @@
+{
+  "message": [
+    {
+      "name": "SRC-frappe-237",
+      "app": "frappe",
+      "repository": "frappe",
+      "repository_url": "https://github.com/frappe/frappe",
+      "repository_owner": "frappe",
+      "branch": "version-16",
+      "team": "user@example.com",
+      "public": 1,
+      "app_title": "Frappe Framework",
+      "title": "Frappe Framework",
+      "collect_feedback": 0,
+      "hash": "3d1284c5fdb52207a516a49bbf2fd186cb43b3ab",
+      "commit_message": "chore(release): Bumped to Version 16.55.2",
+      "subscription_available": false,
+      "billing_type": "prepaid",
+      "subscription": {}
+    },
+    {
+      "name": "SRC-erpnext-542",
+      "app": "erpnext",
+      "repository": "erpnext",
+      "repository_url": "https://github.com/frappe/erpnext",
+      "repository_owner": "frappe",
+      "branch": "version-16",
+      "team": "user@example.com",
+      "public": 1,
+      "app_title": "ERPNext",
+      "title": "ERPNext",
+      "collect_feedback": 0,
+      "hash": "9cd11b19575bfc34f092a24f6c8b368c4dd69481",
+      "commit_message": "chore(release): Bumped to Version 16.53.0",
+      "subscription_available": false,
+      "billing_type": "prepaid",
+      "subscription": {}
+    },
+    {
+      "name": "SRC-hrms-199",
+      "app": "hrms",
+      "repository": "hrms",
+      "repository_url": "https://github.com/frappe/hrms",
+      "repository_owner": "frappe",
+      "branch": "version-16",
+      "team": "user@example.com",
+      "public": 1,
+      "app_title": "Frappe HR",
+      "title": "HR & Payroll",
+      "collect_feedback": 0,
+      "hash": "b12d935b99c1434618845fdd9f3a3d340b5a3aed",
+      "commit_message": "chore(release): Bumped to Version 16.53.0",
+      "subscription_available": false,
+      "billing_type": "prepaid",
+      "subscription": {}
+    }
+  ]
+}

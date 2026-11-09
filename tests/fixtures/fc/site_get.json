@@ -1,0 +1,39 @@
+{
+  "message": {
+    "name": "name-15.example.com",
+    "host_name": "name-15.example.com",
+    "status": "Active",
+    "archive_failed": false,
+    "trial_end_date": null,
+    "setup_wizard_complete": 1,
+    "group": "group-1",
+    "team": "name-2",
+    "group_public": 0,
+    "latest_frappe_version": "Version 16",
+    "frappe_version": "Version 16",
+    "server": "server-1.example.com",
+    "server_region_info": {
+      "title": "title-2",
+      "image": "/files/host.example.com"
+    },
+    "can_change_plan": true,
+    "hide_config": 0,
+    "communication_infos": [],
+    "ip": "ip-1.example.com",
+    "site_tags": [],
+    "tags": [],
+    "info": {
+      "owner": {
+        "first_name": "first_name-1",
+        "last_name": "last_name-1",
+        "user_image": null
+      },
+      "created_on": "2026-10-10 10:56:17.655852",
+      "last_deployed": "2026-11-09 17:58:02.055454",
+      "auto_updates_enabled": true
+    },
+    "pending_for_long": false,
+    "site_migration": null,
+    "version_upgrade": null
+  }
+}

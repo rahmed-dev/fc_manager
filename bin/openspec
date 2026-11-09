@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Project-local OpenSpec CLI. Pinned version, telemetry off.
+export OPENSPEC_TELEMETRY=0
+exec npx -y @fission-ai/openspec@1.16.1 "$@"

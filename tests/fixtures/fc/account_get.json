@@ -1,0 +1,91 @@
+{
+  "message": {
+    "user": {
+      "name": "user@example.com",
+      "email": "user@example.com",
+      "full_name": "full_name-1"
+    },
+    "teams": [
+      {
+        "name": "name-2",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-3",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-4",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-5",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-6",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-7",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-8",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-9",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-10",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-11",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-12",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-13",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      },
+      {
+        "name": "name-14",
+        "team_title": "team_title-1",
+        "user": "user@example.com"
+      }
+    ]
+  },
+  "_other_fields": [
+    "balance",
+    "billing_info",
+    "child_team_members",
+    "feature_flags",
+    "number_of_sites",
+    "onboarding",
+    "parent_team",
+    "partner_billing_name",
+    "partner_email",
+    "saas_site_request",
+    "ssh_key",
+    "team",
+    "team_members"
+  ]
+}

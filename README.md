@@ -1,0 +1,164 @@
+# fc_manager
+
+`fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
+all the teams that your FC login can reach.
+
+This version is **read-only**. It never changes anything on FC.
+
+## Install
+
+You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone <this repository> fc_manager
+cd fc_manager
+uv sync
+uv run fcm --help
+```
+
+To put `fcm` on your PATH, run `uv tool install .` from the repository root.
+
+## Add a profile
+
+A profile is one FC login. One login has one API key and one API secret, and it reaches
+every team that the login is a member of. You do not list teams yourself; `fcm` finds them.
+
+1. In the FC dashboard, open **Settings > Profile & Team > API Access** and create an API key.
+   FC shows the secret one time only.
+2. Add the profile. `fcm` asks for the key, and then for the secret in a hidden prompt:
+
+   ```bash
+   fcm profile add work
+   ```
+
+   `fcm` checks the key with FC before it saves it, and prints your FC user and the number
+   of teams it found.
+
+Other profile commands:
+
+```bash
+fcm profile list                  # names, default marker, base URL (never credentials)
+fcm profile test work             # check the key with FC, show the teams
+fcm profile add work --replace    # give a profile a new key
+fcm profile remove work           # asks for confirmation; --yes skips the question
+```
+
+The first profile you add becomes the default. To use another profile for one command,
+pass `--profile <name>` or set `FCM_PROFILE`.
+
+## Commands
+
+Every command has the form `fcm <noun> <verb> [TARGET] [options]`. Nouns are singular
+(`profile`, `team`, `bench`, `site`). There are no aliases: `fcm sites` tells you to use
+`fcm site list`.
+
+```bash
+fcm team list                                  # every team your login reaches
+fcm bench list                                 # benches (FC release groups) in all teams
+fcm bench list --team "ACME Corp"              # one team, by title or FC name
+fcm site list                                  # sites in all teams
+fcm site list --bench "ACME Prod"              # sites on one bench, by title or FC name
+fcm site list --status update-available        # active, inactive, broken, trial, update-available
+fcm site show erp.acme.com                     # one site with its installed apps
+fcm site show                                  # on a terminal: pick the site from a list
+```
+
+Options that work on every command:
+
+| Option | Meaning |
+| --- | --- |
+| `--profile NAME` | Use this profile for this command. |
+| `--json` | Write JSON to stdout. Errors go to stderr as one JSON object. Never prompts. |
+| `--debug` | Show each FC request (method, team, HTTP status, time) and full tracebacks on stderr, with secrets masked. |
+
+**Names or titles.** FC names are often generated ids, such as `bench-1234`. Wherever you
+give a team or a bench, you can type its FC name or its title, as shown in the FC dashboard.
+For a team, you can also type its owner email. `fcm` tries an exact name first, then the
+owner email (teams only), then the title. Case does not matter for emails and titles.
+
+**Team labels.** Many FC teams keep the default title "Parent Team". When 2 or more teams
+share a title, `fcm` shows each team's owner email instead, in tables, pickers and errors.
+`fcm team list` shows the id, the title and the owner of every team.
+
+**Picker.** On a terminal, when the target is missing (`fcm site show`) or a title matches
+more than one item (two benches called "Prod"), `fcm` shows a list you can filter by typing.
+With `--json`, or when the output goes to a pipe or a script, `fcm` never prompts: it exits
+with code 2 and lists the candidates.
+
+**Partial failure.** When a command covers several teams and one team fails (for example,
+your role in a client team does not allow it), `fcm` still shows the results from the other
+teams, names the failed team, and exits with code 7.
+
+**Limited roles.** In a client team, your role may allow FC to list a site but not show its
+details. `fcm site show` then shows what the site list already gave (team, bench, status,
+version, region, update), says that details and apps are not permitted for your role, names
+the team owner to ask, and exits with code 4.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Unexpected error, or FC refused the request |
+| 2 | Usage or configuration error (also: picker cancelled, missing target in a script) |
+| 3 | Authentication error (FC rejected the key) |
+| 4 | Permission error |
+| 5 | Not found |
+| 6 | Network, server or rate-limit error |
+| 7 | Partial failure across teams |
+
+## Credentials and security
+
+- **Keyring only.** `fcm` stores the API key and the API secret in the OS keyring (macOS
+  Keychain, Windows Credential Manager, or the Secret Service on Linux). It never writes a
+  secret to a plain file.
+- **No keyring?** On a host with no secure keyring (for example a headless Linux server),
+  `fcm profile add` refuses to store anything. Set the credentials in the environment
+  instead:
+
+  ```bash
+  export FCM_API_KEY=...       # both variables are needed
+  export FCM_API_SECRET=...
+  fcm team list
+  ```
+
+  When both variables are set, they take precedence over the keyring for that run.
+- **The config file holds no secrets.** It holds the profile names, the default profile and
+  the base URL of each profile. Its location is the user config directory, for example
+  `~/.config/fc_manager/config.toml` on Linux, with file mode `0600`.
+- **The secret is never a command-line argument**, so it does not go into your shell history.
+- **Redaction.** `fcm` masks the key, the secret and the `Authorization` header in all
+  output, errors and `--debug` output.
+- **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
+- **Read-only.** The HTTP client has a fixed allowlist of read-only FC API methods. A call
+  to any other method fails inside `fcm` before any request goes out.
+
+To report a security problem, do not open a public issue. Contact the maintainer directly.
+
+## Development
+
+```bash
+uv sync
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+```
+
+**Dev credentials.** For day-to-day work on a host with no keyring, keep a dev key in a
+git-ignored `.env` file:
+
+```bash
+cp .env.example .env
+chmod 600 .env          # bin/fcm-dev refuses to run otherwise
+$EDITOR .env            # fill in FCM_API_KEY and FCM_API_SECRET
+./bin/fcm-dev team list
+```
+
+`bin/fcm-dev` runs `uv run --env-file .env fcm ...`: uv puts the values into the
+environment, and `fcm` reads them as normal environment variables. `fcm` itself never reads
+a secret file. The file is plain text, so use a dev API key that you can revoke.
+
+The FC API spike (`scripts/fc_spike.py`) uses the same file:
+
+```bash
+uv run --env-file .env python scripts/fc_spike.py
+```

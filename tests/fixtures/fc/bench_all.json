@@ -1,0 +1,24 @@
+{
+  "message": [
+    {
+      "number_of_sites": 1,
+      "name": "group-2",
+      "title": "title-3",
+      "version": "Version 16",
+      "creation": "2026-09-14 12:04:51.089355",
+      "tags": [],
+      "number_of_apps": 10,
+      "status": "Active"
+    },
+    {
+      "number_of_sites": 1,
+      "name": "group-1",
+      "title": "title-1",
+      "version": "Version 16",
+      "creation": "2026-10-09 10:14:25.862356",
+      "tags": [],
+      "number_of_apps": 10,
+      "status": "Active"
+    }
+  ]
+}

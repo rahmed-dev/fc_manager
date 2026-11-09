@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Dev-only: run fcm with credentials from the repo's .env file.
+# uv loads .env into the environment; fcm itself never reads a secret file.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+env_file="$root/.env"
+
+if [[ ! -f "$env_file" ]]; then
+  echo "fcm-dev: $env_file not found. Copy .env.example to .env and fill it in." >&2
+  exit 2
+fi
+mode="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file")"
+if [[ "$mode" != "600" && "$mode" != "400" ]]; then
+  echo "fcm-dev: $env_file has mode $mode; other users may read it. Run: chmod 600 .env" >&2
+  exit 2
+fi
+
+exec uv run --project "$root" --env-file "$env_file" fcm "$@"

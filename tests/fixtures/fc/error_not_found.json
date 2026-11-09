@@ -1,0 +1,4 @@
+{
+  "exc_type": "PermissionError",
+  "_server_messages": "[\"{\\\"message\\\": \\\"Not Permitted\\\", \\\"title\\\": \\\"Message\\\", \\\"indicator\\\": \\\"red\\\", \\\"raise_exception\\\": 1, \\\"__frappe_exc_id\\\": \\\"de85a52e2423655718d82e8caa6a94939145c783822391304078a098\\\"}\"]"
+}
