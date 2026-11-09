@@ -18,11 +18,15 @@ Every command SHALL have the form `fcm <noun> <verb> [TARGET] [options]`. The no
 - **THEN** the system exits with code 2 and suggests `fcm site list`
 
 ### Requirement: Fixed verb set
-The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs.
+The system SHALL use only these verbs for commands that do not change FC: `list` (many items), `show` (one item in detail), `add` and `remove` (local profiles only), and `test` (credential check). A new read command SHALL reuse one of these verbs. The system SHALL use only the verb `deploy` for a command that changes FC. Every command with a verb that changes FC SHALL show a preview and require a typed confirmation before its first write request.
 
 #### Scenario: Detail of one item
 - **WHEN** the user wants the details of one site
 - **THEN** the command is `fcm site show <name>`
+
+#### Scenario: Write verb
+- **WHEN** the user wants to deploy app updates to a bench
+- **THEN** the command is `fcm bench deploy <bench>`, and it shows a preview and asks for a typed confirmation before it changes FC
 
 ### Requirement: Positional target
 When a command acts on one item, the item SHALL be the one positional argument, and it SHALL identify an item of the command's noun. A command SHALL NOT take its main target as an option. The positional argument MAY be left out only where the interactive picker applies.
@@ -98,7 +102,7 @@ Each error SHALL show what failed, the target (profile, team, bench, or site) wh
 - **THEN** the hint says to ask `owner@acme.example.com` for access, and does not tell the user to leave the team out with `--team` for a single-item command
 
 ### Requirement: Stable exit codes
-The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage or configuration error, 3 authentication error, 4 permission error, 5 not found, 6 network or server error, 7 partial failure across teams.
+The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage or configuration error, 3 authentication error, 4 permission error, 5 not found, 6 network or server error, 7 partial failure across teams, 8 an FC job that FC accepted but that failed.
 
 #### Scenario: Not found
 - **WHEN** `fcm site show missing.example.com` finds no site
@@ -107,6 +111,10 @@ The system SHALL exit with these codes: 0 success, 1 unexpected error, 2 usage o
 #### Scenario: Partial failure
 - **WHEN** a list over several teams succeeds for some teams and fails for one
 - **THEN** the exit code is 7
+
+#### Scenario: Deploy failed on FC
+- **WHEN** FC accepts a deploy and the build then fails
+- **THEN** the exit code is 8
 
 ### Requirement: Debug output
 The system SHALL accept `--debug`. With `--debug`, the system SHALL write each request method name, team, HTTP status, and duration to stderr, and SHALL show the traceback for unexpected errors, with secrets redacted.
