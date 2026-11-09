@@ -1,10 +1,13 @@
-"""cli-hub group 3: `fcm` with no command opens the menu (team, bench, action)."""
+"""cli-hub group 3 and site-migrate group 6: `fcm` with no command opens the menu
+(team, bench, action, and the site step for a site action)."""
 
 # ruff: noqa: F811 - the dfc and tty fixtures come from test_cli_deploy
 
 import pytest
 
 from fc_manager.cli import deploy as deploy_cli
+from fc_manager.cli import menu as menu_cli
+from fc_manager.cli import migrate as migrate_cli
 from fc_manager.cli import picker
 from fc_manager.errors import PermissionDenied
 
@@ -68,6 +71,7 @@ def test_action_menu_names_the_direct_commands(dfc, cli, tty, menu):
     assert prompts[2][1] == [
         "Show bench (bench-show)",
         "Deploy app updates (bench-deploy)",
+        "Migrate a site (site-migrate)",
         "Pick another bench",
         "Quit",
     ]
@@ -142,3 +146,112 @@ def test_other_bench_entry_goes_to_bench_step(dfc, cli, tty, menu):
     assert result.code == 0
     assert names(prompts) == ["Team", "Bench", "Action", "Bench", "Action"]
     assert prompts[4][2] == "work > ACME Corp > Prod (bench-1240)"
+
+
+# --- site-migrate group 6: registry and site step ------------------------------------
+
+SITE = "erp.acme.example.com"
+SITE_PATH = f"work > ACME Corp > ACME Prod (bench-1234) > {SITE}"
+
+
+@pytest.fixture
+def mig(dfc, monkeypatch):
+    """The deploy fake FC, with the migrate job docs and no real sleeping."""
+    monkeypatch.setattr(migrate_cli.time, "sleep", lambda _s: None)
+    return dfc
+
+
+def migrate_posts(fc):
+    return [m for m, _, verb in fc.teams_seen if verb == "POST"]
+
+
+def test_every_entry_names_its_direct_command():
+    for action in menu_cli.ACTIONS:
+        assert action.title == f"{action.label} ({action.command})"
+        assert action.scope in ("bench", "site")
+
+
+def test_site_step_lists_sites_of_the_bench_only(mig, cli, tty, menu):
+    script, prompts = menu
+    _, answers = tty
+    script += ["team-acme", "bench-1234", "migrate", SITE, "quit"]
+    answers["text"] = ["nope"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert names(prompts) == ["Team", "Bench", "Action", "Site", "Action"]
+    assert prompts[3][1] == [f"{SITE}  (Active)", "hr.acme.example.com  (Inactive)"]
+    assert prompts[3][2] == "work > ACME Corp > ACME Prod (bench-1234)"
+    # After the action, the action menu of the same bench, with no site in the path.
+    assert prompts[4][2] == "work > ACME Corp > ACME Prod (bench-1234)"
+
+
+def test_migrate_from_menu_sends_nothing_before_the_typed_name(mig, cli, tty, menu):
+    script, _ = menu
+    seen, answers = tty
+    script += ["team-acme", "bench-1234", "migrate", SITE, "quit"]
+    answers["text"] = ["nope"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "Migrate preview" in result.out
+    assert seen["text"] == [f"Type the site name to migrate ({SITE}):"]
+    assert migrate_posts(mig) == []
+    assert "ancelled" in result.err
+
+
+def test_migrate_from_menu_with_typed_name(mig, cli, tty, menu):
+    script, prompts = menu
+    _, answers = tty
+    script += ["team-acme", "bench-1234", "migrate", SITE, "quit"]
+    answers["text"] = [SITE]
+    result = cli()
+    assert result.code == 0, result.err
+    assert migrate_posts(mig) == ["press.api.site.migrate"]
+    assert "the site is migrated" in result.out
+    assert names(prompts)[-1] == "Action"
+
+
+def test_site_path_reaches_the_action(mig, cli, tty, menu, monkeypatch):
+    got = []
+    monkeypatch.setattr(
+        migrate_cli, "migrate_site", lambda s, site, opts, *, in_menu, path: got.append(path)
+    )
+    script, _ = menu
+    script += ["team-acme", "bench-1234", "migrate", SITE, "quit"]
+    assert cli().code == 0
+    assert got == [SITE_PATH]
+
+
+def test_esc_at_site_step_returns_to_actions(mig, cli, tty, menu):
+    script, prompts = menu
+    script += ["team-acme", "bench-1234", "migrate", BACK, "quit"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert names(prompts) == ["Team", "Bench", "Action", "Site", "Action"]
+    assert migrate_posts(mig) == []
+
+
+def test_bench_with_no_site(mig, cli, tty, menu):
+    mig.sites["team-acme"] = [x for x in mig.sites["team-acme"] if x["group"] != "bench-1240"]
+    script, prompts = menu
+    script += ["team-acme", "bench-1240", "migrate", "quit"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "Bench Prod has no site." in result.out
+    assert names(prompts) == ["Team", "Bench", "Action", "Action"]
+
+
+def test_ctrl_c_in_migrate_watch_returns_to_actions(mig, cli, tty, menu, monkeypatch):
+    def interrupt(_s):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(migrate_cli.time, "sleep", interrupt)
+    script, prompts = menu
+    _, answers = tty
+    script += ["team-acme", "bench-1234", "migrate", SITE, "quit"]
+    answers["text"] = [SITE]
+    mig.job_docs = [{"name": "job-new", "status": "Running", "steps": []}]
+    result = cli()
+    assert result.code == 0, result.err
+    assert "The migrate continues on FC" in result.out
+    assert names(prompts) == ["Team", "Bench", "Action", "Site", "Action"]
+    assert migrate_posts(mig) == ["press.api.site.migrate"]

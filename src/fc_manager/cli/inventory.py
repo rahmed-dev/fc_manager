@@ -176,6 +176,47 @@ def _resolve_bench(s: Session, teams, query: str) -> Bench | None:
     )
 
 
+def _match_site(s: Session, result: Fanout[Site], teams, query: str) -> Site:
+    """The site named `query` in the listed sites, or a pick when it matches several."""
+    found = resolve(result.rows, query, name=lambda x: x.name, title=lambda x: x.name)
+    if isinstance(found, Resolved):
+        return found.item
+    if isinstance(found, Ambiguous):
+        return picker.pick_or_fail(
+            interactive=s.interactive,
+            prompt="Site",
+            options=[(_site_label(x), x) for x in found.candidates],
+            problem=f"Site {query!r} matches {len(found.candidates)} sites",
+        )
+    if result.failures:
+        raise_failures(result, teams)
+    close = ", ".join(x.name for x in found.close_matches)
+    raise NotFound(
+        f"Site {query} not found in {teams_phrase(teams)}",
+        hint=f"Close matches: {close}" if close else "Run: fcm site-list",
+    )
+
+
+def resolve_site(s: Session, teams, query: str) -> Site:
+    """The site from its name (or a unique part of it), as `fcm site-show` finds it."""
+    return _match_site(s, s.inventory.sites(teams), teams, query)
+
+
+def choose_site(s: Session, bench: Bench, *, back: bool, path: str | None = None) -> Site | None:
+    """The site step: one site of `bench`, picked from the sites of that bench only.
+    Returns None when the bench has no site. Esc raises picker.GoBack when `back`."""
+    result = s.inventory.sites([bench.team])
+    if result.failures:
+        raise_failures(result, [bench.team])
+    rows = [x for x in result.rows if x.bench == bench.name]
+    if not rows:
+        s.out.message(f"Bench {bench.title or bench.name} has no site.")
+        return None
+    return picker.choose(
+        "Site", [(f"{x.name}  ({x.status})", x) for x in rows], back=back, path=path
+    )
+
+
 @app.command("site-list", rich_help_panel="Site")
 def site_list(
     team: TeamOpt = None,
@@ -241,24 +282,7 @@ def site_show(
                 problem="No site given",
             )
         else:
-            found = resolve(sites, site, name=lambda x: x.name, title=lambda x: x.name)
-            if isinstance(found, Resolved):
-                target = found.item
-            elif isinstance(found, Ambiguous):
-                target = picker.pick_or_fail(
-                    interactive=s.interactive,
-                    prompt="Site",
-                    options=[(_site_label(x), x) for x in found.candidates],
-                    problem=f"Site {site!r} matches {len(found.candidates)} sites",
-                )
-            else:
-                if result.failures:
-                    raise_failures(result, teams)
-                close = ", ".join(x.name for x in found.close_matches)
-                raise NotFound(
-                    f"Site {site} not found in {teams_phrase(teams)}",
-                    hint=f"Close matches: {close}" if close else "Run: fcm site-list",
-                )
+            target = _match_site(s, result, teams, site)
 
         try:
             detail = s.inventory.site_detail(target)

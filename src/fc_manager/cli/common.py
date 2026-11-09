@@ -58,6 +58,18 @@ def session(profile: str | None, json_mode: bool, debug: bool) -> Iterator[Sessi
         client.close()
 
 
+def target_path(s: Session, team: Team | None = None, bench=None, site=None) -> str:
+    """The target path shown above each prompt: profile > team > bench > site."""
+    parts = [s.profile.label]
+    if team is not None:
+        parts.append(team.display)
+    if bench is not None:
+        parts.append(f"{bench.title or bench.name} ({bench.name})")
+    if site is not None:
+        parts.append(site.name)
+    return " > ".join(parts)
+
+
 def team_label(team: Team) -> str:
     """Team for messages and pickers: its display label, plus the FC id when different."""
     return team.display if team.display == team.name else f"{team.display} ({team.name})"

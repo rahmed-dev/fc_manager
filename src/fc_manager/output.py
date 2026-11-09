@@ -104,6 +104,11 @@ class Output:
             return
         self.console.print(escape(text))
 
+    def warning(self, text: str) -> None:
+        if self.json_mode:
+            return
+        self.console.print(f"Warning: {escape(text)}", style="yellow")
+
     def debug(self, line: str) -> None:
         self.err_console.print(escape(redact(line)), style="dim")
 

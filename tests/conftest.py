@@ -156,8 +156,20 @@ class FakeFC:
     statuses: list = field(default_factory=list)
     builds: list = field(default_factory=list)
     posts: list = field(default_factory=list)
-    post_error: tuple | None = None  # (status, body) for the deploy POST
+    post_error: tuple | None = None  # (status, body) for the deploy or migrate POST
     teams_seen: list = field(default_factory=list)
+    # migrate: "Migrate Site" job rows, rows of other jobs, job docs (a sequence; the last
+    # repeats). running_jobs lists the Pending and Running rows. A migrate POST adds the
+    # Pending job "job-new".
+    migrate_jobs: list = field(
+        default_factory=lambda: [
+            {"name": "job-old", "job_type": "Migrate Site", "status": "Success"}
+        ]
+    )
+    other_jobs: list = field(default_factory=list)
+    job_docs: list = field(default_factory=list)
+    migrate_posts: list = field(default_factory=list)
+    migrate_makes_job: bool = True  # False: FC accepts the migrate, but no job shows up
 
     @staticmethod
     def _next(seq: list, default):
@@ -193,6 +205,30 @@ class FakeFC:
                 status, body = self.post_error
                 return httpx.Response(status, json=body)
             return httpx.Response(200, json={"message": "pipeline-1"})
+        if method == "press.api.site.migrate":
+            self.migrate_posts.append(json.loads(request.content))
+            if self.post_error:
+                status, body = self.post_error
+                return httpx.Response(status, json=body)
+            if self.migrate_makes_job:
+                self.migrate_jobs.insert(
+                    0, {"name": "job-new", "job_type": "Migrate Site", "status": "Pending"}
+                )
+            return httpx.Response(200, json={"message": None})
+        if method == "press.api.site.running_jobs":
+            rows = [
+                {"id": j["name"], "name": j["job_type"], "status": j["status"], "steps": []}
+                for j in self.other_jobs + self.migrate_jobs
+                if j["status"] in ("Pending", "Running")
+            ]
+            return httpx.Response(200, json={"message": rows})
+        if method == "press.api.site.job":
+            done = {
+                "name": request.url.params["job"],
+                "status": "Success",
+                "steps": [{"step_name": "Migrate Site", "status": "Success", "duration": "3"}],
+            }
+            return httpx.Response(200, json={"message": self._next(self.job_docs, done)})
         if method == "press.api.bench.deploy_information":
             seq = self.deploy_infos.get(request.url.params["name"])
             if seq is None:
@@ -224,6 +260,7 @@ class FakeFC:
                             json={
                                 "message": {
                                     "name": name,
+                                    "status": row["status"],
                                     "frappe_version": "Version 15",
                                     "server": "f1-mumbai.example.com",
                                 }

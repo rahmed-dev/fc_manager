@@ -342,3 +342,74 @@ def test_write_validation_error_is_not_retried():
         make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
     assert route.call_count == 1
     assert "already in progress" in (info.value.server_message or "")
+
+
+# --- site-migrate 1.1: site job reads ---------------------------------------------------
+
+
+@respx.mock
+def test_site_job_and_running_jobs_are_allowed():
+    job = respx.get(method_url("press.api.site.job")).respond(json={"message": {}})
+    running = respx.get(method_url("press.api.site.running_jobs")).respond(json={"message": []})
+    make_client().call("press.api.site.job", team="t", job="job-1")
+    make_client().call("press.api.site.running_jobs", team="t", name="erp.acme.example.com")
+    assert job.calls.last.request.url.params["job"] == "job-1"
+    assert running.calls.last.request.url.params["name"] == "erp.acme.example.com"
+
+
+@pytest.mark.parametrize("method", ["press.api.site.jobs", "press.api.client.get_list"])
+def test_job_lists_are_not_allowed(method):
+    """Both fail on FC over GET (HTTP 500, AttributeError on the filters string)."""
+    with respx.mock(assert_all_called=False) as router:
+        route = router.route().respond(json={"message": []})
+        with pytest.raises(MethodNotAllowed):
+            make_client().call(method, team="t", doctype="Agent Job", filters={"site": "x"})
+        assert route.call_count == 0
+
+
+# --- site-migrate 2.1: the migrate write ------------------------------------------------
+
+
+@respx.mock
+def test_migrate_write_sends_one_post():
+    route = respx.post(method_url("press.api.site.migrate")).respond(json={"message": None})
+    make_client().write(
+        "press.api.site.migrate", team="acme", name="erp.acme.example.com",
+        skip_failing_patches=False,
+    )  # fmt: skip
+    request = route.calls.last.request
+    assert request.method == "POST"
+    assert request.headers["X-Press-Team"] == "acme"
+    assert json.loads(request.content) == {
+        "name": "erp.acme.example.com",
+        "skip_failing_patches": False,
+    }
+
+
+@pytest.mark.parametrize("outcome", [httpx.Response(502), httpx.ReadTimeout("t")])
+def test_migrate_write_unknown_names_site_show(outcome):
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        route = router.post(method_url("press.api.site.migrate"))
+        if isinstance(outcome, Exception):
+            route.side_effect = outcome
+        else:
+            route.return_value = outcome
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write("press.api.site.migrate", team="t", name="erp.acme.example.com")
+        assert route.call_count == 1
+    assert "migrate" in info.value.message
+    assert "not known" in info.value.message
+    assert info.value.hint == "Run: fcm site-show erp.acme.example.com"
+
+
+def test_deploy_write_unknown_says_deploy():
+    from fc_manager.errors import WriteUnknown
+
+    with respx.mock() as router:
+        router.post(method_url("press.api.bench.deploy_and_update")).respond(502)
+        with pytest.raises(WriteUnknown) as info:
+            make_client().write("press.api.bench.deploy_and_update", team="t", name="bench-1")
+    assert "deploy request" in info.value.message
+    assert info.value.hint == "Run: fcm bench-show bench-1"

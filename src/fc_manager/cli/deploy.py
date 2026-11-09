@@ -12,12 +12,8 @@ from dataclasses import asdict, dataclass
 from typing import Annotated
 
 import typer
-from rich.console import Group
 from rich.live import Live
-from rich.markup import escape
-from rich.spinner import Spinner
 from rich.table import Table
-from rich.text import Text
 
 from fc_manager.cli import picker
 from fc_manager.cli.common import (
@@ -35,6 +31,7 @@ from fc_manager.cli.common import (
 )
 from fc_manager.cli.inventory import _bench_json, _resolve_bench
 from fc_manager.cli.root import app
+from fc_manager.cli.watch import WatchView, changes, steps_table
 from fc_manager.deploy import (
     AppUpdate,
     DeployInfo,
@@ -147,30 +144,17 @@ def _state_json(state: DeployState) -> dict:
     }
 
 
-def _duration(value: str) -> str:
-    """FC gives build step durations as bare seconds ("15.8"). Add the unit."""
-    try:
-        float(value)
-    except ValueError:
-        return value
-    return f"{value} s"
-
-
 def _sites_line(state: DeployState) -> str:
     return ", ".join(f"{name} ({'moved' if moved else 'waiting'})" for name, moved in state.sites)
 
 
+def _step_status(step) -> str:
+    return step.status + (" (cached)" if step.cached and step.status == "Success" else "")
+
+
 def _steps_table(state: DeployState, running: dict[str, str] | None = None) -> Table:
     """`running` maps a step label to the time text to show for a running step."""
-    table = Table(show_edge=False, pad_edge=False, header_style="bold")
-    table.add_column("Step")
-    table.add_column("Status")
-    table.add_column("Time")
-    for step in state.steps:
-        status = step.status + (" (cached)" if step.cached and step.status == "Success" else "")
-        time_text = (running or {}).get(step.label, _duration(step.duration))
-        table.add_row(escape(step.label), escape(status), escape(time_text))
-    return table
+    return steps_table(state.steps, running, status_text=_step_status)
 
 
 # --- bench-show -----------------------------------------------------------------------
@@ -361,81 +345,20 @@ def _confirm(s: Session, plan: DeployPlan, confirm: str | None) -> None:
         )
 
 
-STALE_SECONDS = 10.0  # no FC answer for this long: the status line turns yellow
+def _deploy_stage(state: DeployState) -> str:
+    return STAGE_TEXT[state.stage]
 
 
-def _seconds(value: float) -> str:
-    value = int(value)
-    return f"{value // 60}m{value % 60:02d}s" if value >= 60 else f"{value} s"
+def _deploy_footer(state: DeployState) -> str | None:
+    return f"Sites: {_sites_line(state)}" if state.stage == "updating_sites" else None
 
 
-class _WatchView:
-    """The live deploy screen. The status line is built again at each screen refresh, so
-    "last FC answer N s ago" grows when a poll hangs, even while no new state arrives."""
-
-    def __init__(self, title: str, clock=time.monotonic):
-        self.title = title
-        self.clock = clock
-        self.started = clock()
-        self.state: DeployState | None = None
-        self.running_since: dict[str, float] = {}  # step label -> first poll that saw Running
-        self.spinner = Spinner("dots")
-        self.done = False
-
-    def update(self, state: DeployState) -> None:
-        self.state = state
-        for step in state.steps:
-            if step.status == "Running":
-                self.running_since.setdefault(step.label, state.checked_at or self.clock())
-
-    def status_line(self) -> Text:
-        now = self.clock()
-        state = self.state
-        stage = STAGE_TEXT[state.stage] if state else "sending the first poll to FC"
-        step = state.current_step if state and not state.final else None
-        line = Text.assemble(
-            ("Deploy ", "bold"),
-            (self.title, "bold"),
-            f": {stage}",
-            f" - {step.label}" if step else "",
-        )
-        line.append(f"\n  elapsed {_seconds(now - self.started)}")
-        if self.done:
-            return line
-        last = state.checked_at if state else self.started
-        age = now - last
-        if age >= STALE_SECONDS:
-            line.append(f"  |  no answer from FC for {_seconds(age)}", style="yellow")
-        else:
-            polls = state.polls if state else 0
-            line.append(f"  |  last FC answer {_seconds(age)} ago (poll {polls})")
-        return line
-
-    def __rich__(self):
-        running = {}
-        if self.state and not self.done:
-            now = self.clock()
-            running = {
-                step.label: f"running {_seconds(now - self.running_since[step.label])}"
-                for step in self.state.steps
-                if step.status == "Running" and step.label in self.running_since
-            }
-        parts = [_steps_table(self.state, running)] if self.state else []
-        if self.state and self.state.stage == "updating_sites":
-            parts.append(Text(f"Sites: {_sites_line(self.state)}"))
-        if self.done:
-            return Group(self.status_line(), *parts)
-        self.spinner.update(text=self.status_line())
-        return Group(self.spinner, *parts)
-
-
-def _changes(states):
-    """Only the states with new FC data (the watch yields one per poll)."""
-    last = None
-    for state in states:
-        if state != last:
-            last = state
-            yield state
+def _WatchView(title: str, clock=time.monotonic) -> WatchView:  # noqa: N802 - kept name
+    """The live deploy screen (see cli/watch.py)."""
+    return WatchView(
+        "Deploy", title, stage_text=_deploy_stage, table=_steps_table, footer=_deploy_footer,
+        clock=clock,
+    )  # fmt: skip
 
 
 def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
@@ -443,7 +366,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
     final: DeployState | None = None
     states = service.watch(plan, sleep=time.sleep)
     if s.out.json_mode:
-        for state in _changes(states):
+        for state in changes(states):
             s.out.emit_json_line({"event": "progress", **_state_json(state)})
             final = state
     elif s.interactive:
@@ -457,7 +380,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
                 view.done = True
                 live.refresh()
     else:
-        for state in _changes(states):
+        for state in changes(states):
             now = f" - {state.current_step.label}" if state.current_step else ""
             if state.stage == "updating_sites":
                 now = f" - {_sites_line(state)}"

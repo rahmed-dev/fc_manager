@@ -37,11 +37,21 @@ READ_ONLY_METHODS: frozenset[str] = frozenset(
         "press.api.site.all",
         "press.api.site.get",
         "press.api.site.installed_apps",
+        "press.api.site.running_jobs",
+        "press.api.site.job",
     }
 )
 
 # Methods that change FC. Only `FCClient.write()` sends them, as POST, with no retry.
-WRITE_METHODS: frozenset[str] = frozenset({"press.api.bench.deploy_and_update"})
+WRITE_METHODS: frozenset[str] = frozenset(
+    {"press.api.bench.deploy_and_update", "press.api.site.migrate"}
+)
+
+# What to read when FC does not confirm a write: (job kind, read command for the target).
+WRITE_FOLLOW_UP: dict[str, tuple[str, str]] = {
+    "press.api.bench.deploy_and_update": ("deploy", "bench-show"),
+    "press.api.site.migrate": ("migrate", "site-show"),
+}
 
 # press.api.client.get reads any doctype the user may see. fcm allows it for these only.
 READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build"})
@@ -141,14 +151,18 @@ class FCClient:
     def write(self, method: str, team: str, **body: Any) -> Any:
         """Send one allowlisted FC write method as POST and return its `message` payload.
 
-        A write is never retried: a second request could start a second deploy. When FC
+        A write is never retried: a second request could start a second deploy or migrate. When FC
         does not confirm the request (timeout or 5xx), the result on FC is not known."""
         if method not in WRITE_METHODS:
             raise MethodNotAllowed(f"FC method is not on the write allowlist: {method}")
         if not team:
             raise MethodNotAllowed(f"A write needs a team: {method}")
-        bench = body.get("name")
-        hint = f"Run: fcm bench-show {bench}" if bench else "Check the FC dashboard."
+        kind, command = WRITE_FOLLOW_UP[method]
+        target_name = body.get("name")
+        hint = f"Run: fcm {command} {target_name}" if target_name else "Check the FC dashboard."
+        unknown = (
+            f"FC did not confirm the {kind} request ({method}). Its result on FC is not known."
+        )
         try:
             return self._send("POST", method, team, body=body)
         except NetworkError as exc:
@@ -158,13 +172,13 @@ class FCClient:
                 exc.hint = f"Nothing reached FC. {exc.hint or ''}".strip()
                 raise
             raise WriteUnknown(
-                f"FC did not confirm the request ({method}). Its result on FC is not known.",
+                unknown,
                 target=exc.target,
                 hint=hint,
             ) from exc
         except ServerError as exc:
             raise WriteUnknown(
-                f"FC did not confirm the request ({method}). Its result on FC is not known.",
+                unknown,
                 target=exc.target,
                 hint=hint,
                 server_message=exc.server_message,

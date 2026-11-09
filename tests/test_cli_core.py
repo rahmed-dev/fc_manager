@@ -84,6 +84,7 @@ def test_every_command_is_one_noun_verb_word_with_a_fixed_verb():
         [
             "profile-add", "profile-list", "profile-test", "profile-remove",
             "team-list", "bench-list", "bench-show", "bench-deploy", "site-list", "site-show",
+            "site-migrate",
         ]
     )  # fmt: skip
     for name, command in _commands():
@@ -126,6 +127,7 @@ def test_help_groups_commands_by_noun(env, cli):
     assert result.code == 0
     for panel in ("Profile", "Team", "Bench", "Site"):
         assert panel in result.out
+    assert "site-migrate" in result.out
 
 
 # --- 3.4: picker ----------------------------------------------------------------------

@@ -129,3 +129,19 @@ class MethodNotAllowed(FcmError):
     """Code asked the API client for a method outside its allowlists."""
 
     kind = ErrorKind.UNEXPECTED
+
+
+class MigrateFailed(FcmError):
+    """FC accepted a migrate, and the migrate job then failed on FC (exit 8)."""
+
+    kind = ErrorKind.JOB_FAILED
+
+    def __init__(self, message: str, *, step: str | None = None, **kwargs) -> None:
+        super().__init__(message, **kwargs)
+        self.step = step
+
+
+class MigrateUnknown(FcmError):
+    """FC accepted a migrate, but fcm cannot find its job. The result is not known (exit 6)."""
+
+    kind = ErrorKind.SERVER

@@ -30,6 +30,7 @@ COMMANDS = [
     ["profile-test", "work"],
     ["bench-show", "bench-1234"],
     ["bench-deploy", "bench-1234", "--all-apps", "--dry-run"],
+    ["site-migrate", "erp.acme.example.com", "--dry-run"],
 ]
 
 FLAGS = [[], ["--debug"], ["--json"], ["--debug", "--json"]]
@@ -112,17 +113,24 @@ WALK = COMMANDS + [
     ["bench-list", "--team", "team-beta"],
     ["profile-list"],
     ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", "--no-wait"],
+    ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com", "--no-wait"],
 ]
 
 DEPLOY = "press.api.bench.deploy_and_update"
+MIGRATE = "press.api.site.migrate"
+# Each write command and the one write method it may send.
+OWN_WRITE = {"bench-deploy": DEPLOY, "site-migrate": MIGRATE}
 
 
 def posts(fake) -> list[str]:
     return [method for method, _, verb in fake.teams_seen if verb == "POST"]
 
 
-def sends_a_deploy(command: list[str]) -> bool:
-    return command[0] == "bench-deploy" and "--dry-run" not in command
+def expected_posts(command: list[str]) -> list[str]:
+    """The POSTs a command may send: its own write method once, or none for a dry run."""
+    if command[0] in OWN_WRITE and "--dry-run" not in command:
+        return [OWN_WRITE[command[0]]]
+    return []
 
 
 def test_walk_covers_every_command():
@@ -141,8 +149,8 @@ def test_every_command_uses_only_allowlisted_methods(env, cli, strict_fc, comman
     result = cli(*command)
     assert result.code == 0, result.err
     assert set(strict_fc.calls) <= READ_ONLY_METHODS | WRITE_METHODS
-    # Only `fcm bench-deploy` (not a dry run) sends a POST, and only the deploy method.
-    assert posts(strict_fc) == ([DEPLOY] if sends_a_deploy(command) else [])
+    # Only a write command (not a dry run) sends a POST, and only its own write method.
+    assert posts(strict_fc) == expected_posts(command)
 
 
 def test_walk_detects_a_post_from_another_command(env, cli, strict_fc, monkeypatch):
@@ -156,7 +164,19 @@ def test_walk_detects_a_post_from_another_command(env, cli, strict_fc, monkeypat
     monkeypatch.setattr(Inventory, "benches", benches_that_write)
     cli("bench-list")
     assert posts(strict_fc) == [DEPLOY]
-    assert posts(strict_fc) != ([DEPLOY] if sends_a_deploy(["bench-list"]) else [])
+    assert posts(strict_fc) != expected_posts(["bench-list"])
+
+
+def test_walk_detects_the_wrong_write_from_site_migrate(env, cli, strict_fc, monkeypatch):
+    """Guard for the guard: site-migrate that sent the deploy method would fail the walk."""
+    from fc_manager import migrate
+
+    save_profile("work")
+    monkeypatch.setattr(migrate, "MIGRATE_METHOD", DEPLOY)
+    command = WALK[-1]
+    cli(*command)
+    assert posts(strict_fc) == [DEPLOY]
+    assert posts(strict_fc) != expected_posts(command)
 
 
 def test_strict_router_fails_on_a_method_off_the_allowlist(env, strict_fc):
@@ -165,7 +185,7 @@ def test_strict_router_fails_on_a_method_off_the_allowlist(env, strict_fc):
         httpx.get(f"{BASE}/api/method/press.api.bench.deploy")
 
 
-# --- bench-deploy 2.4: the write path never leaks the canary ---------------------------
+# --- bench-deploy 2.4 / site-migrate 5.3: the write path never leaks the canary -----
 
 WRITE_ERRORS = {
     "server": lambda r: httpx.Response(502, text=_echo_headers(r)),
@@ -177,9 +197,16 @@ WRITE_ERRORS = {
 }
 
 
+WRITE_COMMANDS = [
+    ["bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234"],
+    ["site-migrate", "erp.acme.example.com", "--confirm", "erp.acme.example.com"],
+]
+
+
 @pytest.mark.parametrize("path", sorted(WRITE_ERRORS))
 @pytest.mark.parametrize("flags", FLAGS, ids=lambda f: " ".join(f) or "plain")
-def test_canary_never_leaks_on_deploy_errors(canary_profile, cli, flags, path):
+@pytest.mark.parametrize("command", WRITE_COMMANDS, ids=lambda c: c[0])
+def test_canary_never_leaks_on_write_errors(canary_profile, cli, command, flags, path):
     fake = default_fake()
 
     def handler(request):
@@ -190,7 +217,7 @@ def test_canary_never_leaks_on_deploy_errors(canary_profile, cli, flags, path):
 
     with respx.mock(base_url=BASE, assert_all_called=False) as router:
         router.route().mock(side_effect=handler)
-        result = cli("bench-deploy", "bench-1234", "--all-apps", "--confirm", "bench-1234", *flags)
+        result = cli(*command, *flags)
     assert result.code != 0
     assert len(fake.posts) == 1  # never retried
     for stream in (result.out, result.err):

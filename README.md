@@ -1,11 +1,12 @@
 # fc_manager
 
 `fcm` is a command-line tool to explore Frappe Cloud (FC) teams, benches and sites across
-all the teams that your FC login can reach, and to deploy app updates to a bench.
+all the teams that your FC login can reach, to deploy app updates to a bench, and to
+migrate a site.
 
-Only one command changes FC: `fcm bench-deploy`. It shows a preview of the target and the
-changes, and starts nothing until you type the bench title. Every other command is
-read-only.
+Two commands change FC: `fcm bench-deploy` and `fcm site-migrate`. Each one shows a
+preview of the target and the change, and starts nothing until you type the bench title or
+the site name. Every other command is read-only.
 
 ## Install
 
@@ -67,6 +68,7 @@ fcm site-show erp.acme.com                     # one site with its installed app
 fcm site-show                                  # on a terminal: pick the site from a list
 fcm bench-show "ACME Prod"                     # apps with updates, sites, a running deploy
 fcm bench-deploy "ACME Prod"                   # deploy app updates (see below)
+fcm site-migrate erp.acme.com                  # run bench migrate on one site (see below)
 ```
 
 Options that work on every command:
@@ -106,17 +108,21 @@ Run `fcm` with no command on a terminal to open the menu:
 
 1. **Team**: pick a team (skipped when your login reaches one team only).
 2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
-3. **Action**: "Show bench (bench-show)", "Deploy app updates (bench-deploy)", "Pick another
-   bench", or "Quit".
+3. **Action**: "Show bench (bench-show)", "Deploy app updates (bench-deploy)", "Migrate a
+   site (site-migrate)", "Pick another bench", or "Quit".
+4. **Site** (site actions only): pick a site of that bench. The list shows only the sites
+   of that bench, with their status.
 
-Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`.
-Each action runs the same code as its command, so a deploy shows the same preview and asks
-for the same typed bench title. After an action ends, also with an error or a cancelled
-deploy, the action menu of the same bench opens again.
+Every prompt shows the target path, for example `work > ACME Corp > ACME Prod (bench-1234)`,
+and after a site pick `work > ACME Corp > ACME Prod (bench-1234) > erp.acme.com`. Each
+action runs the same code as its command, so a deploy or a migrate shows the same preview
+and asks for the same typed confirmation. After an action ends, also with an error or a
+cancelled confirmation, the action menu of the same bench opens again.
 
-Esc goes back one step: action menu to bench, bench to team, team out of `fcm`. Esc at the
-app step of a deploy goes back to the action menu. Ctrl+C at a menu prompt ends `fcm` (exit
-130). Ctrl+C during a deploy watch stops the watch only, and the action menu opens again.
+Esc goes back one step: site to action menu, action menu to bench, bench to team, team out
+of `fcm`. Esc at the app step of a deploy goes back to the action menu. Ctrl+C at a menu
+prompt ends `fcm` (exit 130). Ctrl+C during a deploy or migrate watch stops the watch only,
+and the action menu opens again.
 `fcm --profile NAME` opens the menu with that profile. Without a terminal, `fcm` prints the
 help.
 
@@ -157,6 +163,34 @@ Not in this version: in-place update, patch deploy, skipping backups or failing 
 and an override of the FC "will fail" check. When FC refuses a deploy, `fcm` shows the FC
 message and stops. Use the FC dashboard for those cases.
 
+### Migrate a site
+
+`fcm site-migrate` runs `bench migrate` on one site through FC, as the "Migrate" action in
+the FC dashboard does. On a terminal it walks you through these steps:
+
+1. **Site.** Give the site name, or pick it: team, then bench, then a site of that bench.
+2. **Checks.** `fcm` reads the site status and the FC jobs of the site. It stops, and sends
+   nothing, when FC does not migrate a site in that status (FC migrates a site that is
+   Active, Inactive or Broken), or when the site has an FC job in progress.
+3. **Preview.** The profile, the team and its owner, the bench, the site and its status,
+   and the patch mode: "Stop on a failing patch" (the default) or "Skip failing patches".
+4. **Confirm.** Type the site name exactly. Any other input cancels, and nothing is sent.
+5. **Progress.** `fcm` finds the new FC migrate job and follows its steps until it ends.
+   Ctrl+C stops the watch only: the migrate continues on FC.
+6. **Result.** "the site is migrated" (exit 0), or the failed step (exit 8). The result
+   shows the site status on FC after the job. A failed migrate can leave the site Broken.
+
+```bash
+fcm site-migrate --dry-run                              # pick team, bench, site; preview only
+fcm site-migrate erp.acme.com --confirm erp.acme.com    # in a script
+fcm site-migrate erp.acme.com --confirm erp.acme.com --no-wait --json
+```
+
+Without a terminal, you must give the site and `--confirm` with the site name. There is no
+`--yes`. `--skip-failing-patches` lets FC continue past a failing patch; the preview warns
+about it, and the menu never turns it on. When no new migrate job shows up within 2
+minutes after FC accepts the request, `fcm` says that the result is not known (exit 6).
+
 ### Exit codes
 
 | Code | Meaning |
@@ -167,9 +201,9 @@ message and stops. Use the FC dashboard for those cases.
 | 3 | Authentication error (FC rejected the key) |
 | 4 | Permission error |
 | 5 | Not found |
-| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, or a site update not confirmed in 30 minutes) |
+| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, or a migrate job not found in 2 minutes) |
 | 7 | Partial failure across teams |
-| 8 | FC accepted a deploy, but it failed on FC (a failed build step) |
+| 8 | FC accepted a deploy or a migrate, but it failed on FC (a failed build step or migrate step) |
 
 ## Credentials and security
 
@@ -195,13 +229,15 @@ message and stops. Use the FC dashboard for those cases.
   output, errors and `--debug` output.
 - **HTTPS only.** A profile base URL must start with `https://`. TLS verification is always on.
 - **Allowlists.** The HTTP client has a fixed allowlist of read-only FC API methods (GET)
-  and a separate write allowlist with one method, `press.api.bench.deploy_and_update`
-  (POST). Only `fcm bench-deploy` uses the write path. A call to any other method fails
-  inside `fcm` before any request goes out. The generic FC document read
-  (`press.api.client.get`) is allowed for the deploy build doctype only.
-- **No retry of a write.** A deploy request is sent one time only. When FC does not
-  confirm it (a timeout or a server error), `fcm` says that the result on FC is not known
-  and tells you to run `fcm bench-show`. A retry could start a second deploy.
+  and a separate write allowlist with 2 methods (POST): `press.api.bench.deploy_and_update`,
+  used only by `fcm bench-deploy`, and `press.api.site.migrate`, used only by
+  `fcm site-migrate`. A call to any other method fails inside `fcm` before any request goes
+  out. The generic FC document read (`press.api.client.get`) is allowed for the deploy
+  build doctype only. The generic FC list read (`press.api.client.get_list`) is not allowed.
+- **No retry of a write.** A deploy or migrate request is sent one time only. When FC does
+  not confirm it (a timeout or a server error), `fcm` says that the result on FC is not
+  known and tells you to run `fcm bench-show` or `fcm site-show`. A retry could start a
+  second deploy or migrate.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
 

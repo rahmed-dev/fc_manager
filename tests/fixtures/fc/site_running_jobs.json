@@ -1,0 +1,25 @@
+{
+  "message": [
+    {
+      "id": "job-5",
+      "name": "Backup Site",
+      "server": "server-1.example.com",
+      "bench": "bench-1.example.com",
+      "site": "site-1.example.com",
+      "status": "Running",
+      "steps": [
+        {
+          "name": "Backup Site",
+          "index": 0,
+          "step_name": "Backup Site",
+          "status": "Running",
+          "start": "2026-11-09 12:00:04.000000",
+          "end": null,
+          "duration": null,
+          "output": ""
+        }
+      ],
+      "current": {"name": "Backup Site", "status": "Running", "index": 0, "total": 1}
+    }
+  ]
+}

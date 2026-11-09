@@ -13,6 +13,9 @@ It answers three questions:
   3. What do the deploy read methods return (deploy_information, deploy_status, and the
      Deploy Candidate Build doc through client.get)?
      The spike never calls a deploy (write) method.
+  4. What do the site job reads return (site.running_jobs for one site, and site.job for
+     a running job)?
+     The spike never calls a migrate (write) method.
 
 Review every fixture before you commit it. The anonymizer replaces names, titles, emails,
 IP addresses and host names, but you are the last check.
@@ -43,7 +46,8 @@ SENSITIVE_KEYS = {
     "name", "title", "team", "team_title", "user", "email", "full_name", "first_name",
     "last_name", "host_name", "bench", "group", "server", "proxy_server", "ip", "domain",
     "repository", "repository_url", "repository_owner", "commit_message", "owner",
-    "modified_by", "parent_team", "partner_email", "app_title",
+    "modified_by", "parent_team", "partner_email", "app_title", "deploy_candidate", "site",
+    "id",
 }  # fmt: skip
 PUBLIC_OWNERS = {"frappe"}
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
@@ -79,7 +83,7 @@ class Spike:
         headers = {"Authorization": auth, "Accept": "application/json"}
         if team:
             headers["X-Press-Team"] = team
-        query = {k: json.dumps(v) if isinstance(v, dict) else v for k, v in params.items()}
+        query = {k: json.dumps(v) if isinstance(v, dict | list) else v for k, v in params.items()}
         return self.http.get(f"/api/method/{method}", params=query, headers=headers)
 
 
@@ -101,7 +105,12 @@ class Anonymizer:
     def collect(self, node: Any, key: str = "") -> None:
         if isinstance(node, dict):
             public = str(node.get("repository_owner", "")) in PUBLIC_OWNERS
+            # In a running_jobs row (job_detail), `id` is the job and `name` the public job
+            # type, such as "Migrate Site". Keep the job type readable.
+            job_detail = "id" in node and "steps" in node
             for k, v in node.items():
+                if job_detail and k == "name":
+                    continue
                 if isinstance(v, str) and k in SENSITIVE_KEYS and v and not public:
                     self._placeholder(k, v)
                 else:
@@ -200,6 +209,27 @@ def slim_releases(data: Any) -> Any:
     return data
 
 
+def slim_job(data: Any) -> Any:
+    """Job step output holds raw command logs (paths, site names). Keep a short head."""
+    message = data.get("message") if isinstance(data, dict) else None
+    for step in (message or {}).get("steps") or [] if isinstance(message, dict) else []:
+        if isinstance(step, dict) and isinstance(step.get("output"), str):
+            step["output"] = step["output"][:OUTPUT_CHARS]
+    return data
+
+
+def slim_jobs(data: Any) -> Any:
+    """running_jobs rows hold the steps with their output. Keep a short head of each."""
+    for row in (data or {}).get("message") or [] if isinstance(data, dict) else []:
+        if isinstance(row, dict):
+            slim_job({"message": row})
+            if isinstance(row.get("current"), dict) and isinstance(
+                row["current"].get("output"), str
+            ):
+                row["current"]["output"] = row["current"]["output"][:OUTPUT_CHARS]
+    return data
+
+
 def trim(data: Any) -> Any:
     if isinstance(data, dict) and isinstance(data.get("message"), list):
         return {**data, "message": data["message"][:MAX_ROWS]}
@@ -270,6 +300,22 @@ def main() -> int:
         raw["site_installed_apps.json"] = trim(
             body(spike.get("press.api.site.installed_apps", team=team, name=site))
         )
+    # Question 4: site job reads (GET only; no migrate is ever started).
+    # FC has no job list that works over GET: site.jobs and client.get_list both fail on
+    # the filters string (HTTP 500, AttributeError). running_jobs takes a plain site name.
+    if sample_site:
+        team, site = sample_site
+        print("\nSite job reads:")
+        running = spike.get("press.api.site.running_jobs", team=team, name=site)
+        print(f"  site.running_jobs -> HTTP {running.status_code}")
+        rows = (body(running) or {}).get("message") or []
+        print(f"  running jobs: {len(rows)}")
+        raw["site_running_jobs.json"] = slim_jobs(trim(body(running)))
+        if rows and isinstance(rows[0], dict) and rows[0].get("id"):
+            job = spike.get("press.api.site.job", team=team, job=rows[0]["id"])
+            raw["site_job.json"] = slim_job(trim_lists(body(job), 30))
+            print(f"  site.job ({rows[0].get('name')}) -> HTTP {job.status_code}")
+
     # Question 3: deploy read methods (GET only; no deploy is ever started).
     print("\nDeploy read methods:")
     deploy_seen = 0
