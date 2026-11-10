@@ -110,11 +110,25 @@ def _app_note(app: AppUpdate) -> str:
     return "; ".join(notes)
 
 
-def _app_label(app: AppUpdate) -> str:
-    note = _app_note(app)
-    return f"{app.app}  {app.current_version} -> {app.next_version}" + (
-        f"  ({note})" if note else ""
-    )
+def _app_branch(app: AppUpdate) -> str:
+    """The branch in brackets: `[version-15]`, or `[main -> version-15]` when it changes."""
+    if app.will_branch_change:
+        return f"[{app.current_branch or 'unknown'} -> {app.branch or 'unknown'}]"
+    return f"[{app.branch}]" if app.branch else ""
+
+
+def _app_labels(apps: list[AppUpdate]) -> list[str]:
+    """One line per app: name, branch, versions, commit message, in aligned columns."""
+    name_w = max(len(a.app) for a in apps)
+    branch_w = max(len(_app_branch(a)) for a in apps)
+    labels = []
+    for a in apps:
+        line = f"{a.app:<{name_w}}  {_app_branch(a):<{branch_w}}  "
+        line += f"{a.current_version} -> {a.next_version}"
+        if a.next and a.next.message:
+            line += f"  ({a.next.message[:60]})"
+        labels.append(line)
+    return labels
 
 
 def _app_json(app: AppUpdate) -> dict:
@@ -249,7 +263,7 @@ def _choose_apps(s: Session, info: DeployInfo, *, back: bool, path: str | None =
     while True:
         chosen = picker.choose_many(
             "App updates to deploy",
-            [(_app_label(a), a.app) for a in info.updates],
+            list(zip(_app_labels(info.updates), [a.app for a in info.updates], strict=True)),
             selected=False,
             back=back,
             path=path,

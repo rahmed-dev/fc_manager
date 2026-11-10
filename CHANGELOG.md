@@ -4,6 +4,14 @@ All notable changes to `fcm` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-10
+
+### Changed
+
+- The app list of `bench-deploy` shows the branch of each app in brackets, for example
+  `[version-15]`, or `[main -> version-15]` when the deploy changes the branch. The names,
+  the branches and the versions line up in columns.
+
 ## [1.2.0] - 2026-11-10
 
 ### Changed

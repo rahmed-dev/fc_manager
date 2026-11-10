@@ -15,12 +15,12 @@ You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you 
 system has none.
 
 ```bash
-uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.2.0
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.2.1
 ```
 
 uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
 (`~/.local/bin`). If you use pipx instead, run
-`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.2.0`.
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.2.1`.
 
 ### First run
 
@@ -45,7 +45,7 @@ See [Keyring on a headless Linux host](#keyring-on-a-headless-linux-host).
 ### Upgrade and uninstall
 
 ```bash
-uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.2.0   # a newer tag
+uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.2.1   # a newer tag
 fcm --version
 uv tool uninstall fc-manager
 ```

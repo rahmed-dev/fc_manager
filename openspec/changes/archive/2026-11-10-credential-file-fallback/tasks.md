@@ -15,7 +15,7 @@
 
 - [x] 3.1 Rewrite the README section "Keyring on a headless Linux host" and the "Keyring only" and "No keyring?" bullets (design D5). Remove the gnome-keyring steps. Update the install tag to `v1.2.0`. Verify that the section title still matches `credentials.README_SECTION`.
 - [x] 3.2 Add `## [1.2.0]` to `CHANGELOG.md` and set `version = "1.2.0"`. Verify with `uv run fcm --version`.
-- [ ] 3.3 Manual check on this host by Riz: run `fcm`, enter the new key, answer `y`, and see the menu. Then run `fcm profile-list` and see the store `file`.
+- [x] 3.3 Manual check on this host by Riz: run `fcm`, enter the new key, answer `y`, and see the menu. Then run `fcm profile-list` and see the store `file`.
 
 ## Workflow follow-up
 

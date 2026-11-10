@@ -578,3 +578,29 @@ def test_direct_command_passes_no_path(dfc, cli, tty):
     answers["text"] = ["nope"]
     cli("bench-deploy", "bench-1234")
     assert all(entry["path"] is None for entry in seen["many"])
+
+
+def test_app_labels_show_the_branch_of_each_app():
+    from fc_manager.deploy import AppUpdate, Release
+
+    def upd(app, branch, current_branch=None, change=False):
+        return AppUpdate(
+            app=app,
+            title=app,
+            source="s",
+            branch=branch,
+            current_branch=current_branch or branch,
+            current_hash="a" * 40,
+            current_tag="",
+            will_branch_change=change,
+            next=Release(name="r", hash="b" * 40, tag="v1.0.0", message="msg", yanked=False),
+        )
+
+    labels = deploy_cli._app_labels(
+        [
+            upd("frappe", "version-15"),
+            upd("helpdesk", "version-15", current_branch="main", change=True),
+        ]
+    )
+    assert labels[0] == "frappe    [version-15]          aaaaaaa -> v1.0.0  (msg)"
+    assert labels[1] == "helpdesk  [main -> version-15]  aaaaaaa -> v1.0.0  (msg)"
