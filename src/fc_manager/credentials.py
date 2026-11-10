@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 
 import keyring
@@ -39,20 +40,89 @@ def _backend_name(backend: KeyringBackend) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
 
 
-def keyring_usable(backend: KeyringBackend | None = None) -> bool:
-    backend = backend or keyring.get_keyring()
+def _safe_class(backend: KeyringBackend) -> bool:
     children = getattr(backend, "backends", None)
     if children is not None:  # ChainerBackend
-        return any(keyring_usable(child) for child in children)
+        return any(_safe_class(child) for child in children)
     return _backend_name(backend) not in _UNSAFE_BACKENDS
+
+
+# The probe reads this entry. It holds no secret, and the probe never writes it.
+PROBE_ENTRY = "__fcm_probe__"
+# The probe result for this process: (backend, cause), cause None when the read worked.
+_probe: tuple[KeyringBackend, str | None] | None = None
+
+README_SECTION = "Keyring on a headless Linux host"
+
+
+def reset_probe() -> None:
+    """Forget the probe result (for tests)."""
+    global _probe
+    _probe = None
+
+
+def keyring_cause(exc: BaseException) -> str:
+    """The plain cause of a keyring failure, to end the sentence
+    'The OS keyring on this host <cause>'."""
+    if isinstance(exc, keyring.errors.KeyringLocked):
+        return "is locked"
+    if isinstance(exc, keyring.errors.NoKeyringError):
+        return "has no backend"
+    if isinstance(exc, keyring.errors.InitError):
+        return (
+            "cannot open its default keyring "
+            "(no login keyring exists, and the keyring cannot prompt for one)"
+        )
+    return f"does not work ({type(exc).__name__})"
+
+
+def keyring_hint() -> str:
+    if sys.platform.startswith("linux"):
+        return f'{ENV_HINT} See the README: "{README_SECTION}".'
+    return ENV_HINT
+
+
+def keyring_problem(backend: KeyringBackend | None = None) -> str | None:
+    """None when the keyring works, else the cause. The check is one read of
+    PROBE_ENTRY, done once per process for a backend. It never writes."""
+    global _probe
+    backend = backend or keyring.get_keyring()
+    if not _safe_class(backend):
+        return "has no secure backend"
+    if _probe is not None and _probe[0] is backend:
+        return _probe[1]
+    try:
+        backend.get_password(SERVICE, PROBE_ENTRY)
+        cause = None
+    except Exception as exc:  # noqa: BLE001 - any failure means the secret cannot be kept
+        cause = keyring_cause(exc)
+    _probe = (backend, cause)
+    return cause
+
+
+def keyring_usable(backend: KeyringBackend | None = None) -> bool:
+    return keyring_problem(backend) is None
+
+
+def keyring_error(lead: str | None = None) -> UsageError:
+    """The 'no keyring' error, with the cause of the last check."""
+    cause = keyring_problem() or "is not usable"
+    message = f"The OS keyring on this host {cause}"
+    if lead:
+        message = f"{lead}. {message}"
+    return UsageError(message, hint=keyring_hint())
+
+
+def _failure(action: str, exc: BaseException) -> UsageError:
+    return UsageError(
+        f"Cannot {action} the OS keyring. The OS keyring on this host {keyring_cause(exc)}",
+        hint=keyring_hint(),
+    )
 
 
 def _require_keyring() -> None:
     if not keyring_usable():
-        raise UsageError(
-            "No secure OS keyring is available on this host",
-            hint=ENV_HINT,
-        )
+        raise keyring_error()
 
 
 def store(profile: str, creds: Credentials) -> None:
@@ -61,9 +131,7 @@ def store(profile: str, creds: Credentials) -> None:
     try:
         keyring.set_password(SERVICE, profile, value)
     except keyring.errors.KeyringError as exc:
-        raise UsageError(
-            f"Cannot write to the OS keyring: {type(exc).__name__}", hint=ENV_HINT
-        ) from exc
+        raise _failure("write to", exc) from exc
 
 
 def load(profile: str) -> Credentials:
@@ -71,9 +139,7 @@ def load(profile: str) -> Credentials:
     try:
         value = keyring.get_password(SERVICE, profile)
     except keyring.errors.KeyringError as exc:
-        raise UsageError(
-            f"Cannot read the OS keyring: {type(exc).__name__}", hint=ENV_HINT
-        ) from exc
+        raise _failure("read", exc) from exc
     if not value:
         raise UsageError(
             f"No credentials in the keyring for profile {profile}",
@@ -96,8 +162,7 @@ def delete(profile: str) -> None:
     except keyring.errors.PasswordDeleteError:
         pass  # already gone
     except keyring.errors.KeyringError as exc:
-        reason = type(exc).__name__
-        raise UsageError(f"Cannot remove the keyring entry ({reason})") from exc
+        raise _failure("remove the entry from", exc) from exc
 
 
 def env_credentials() -> Credentials | None:

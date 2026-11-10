@@ -70,6 +70,18 @@ def test_first_run_without_keyring_asks_nothing(terminal, cli, monkeypatch):
     assert asked == [] and opened == []
 
 
+def test_first_run_with_broken_keyring_asks_nothing(terminal, cli, broken_keyring):
+    """keyring-probe: the keyring service runs, but a read fails (no login keyring)."""
+    asked, opened = terminal
+    result = cli()
+    assert result.code == 2
+    assert "cannot open its default keyring" in result.err
+    assert credentials.ENV_KEY in result.err and credentials.ENV_SECRET in result.err
+    assert "Run fcm again" not in result.err
+    assert asked == [] and opened == []
+    assert broken_keyring.writes == 0
+
+
 def test_env_credentials_skip_the_setup(terminal, cli, monkeypatch):
     asked, opened = terminal
     monkeypatch.setenv(credentials.ENV_KEY, KEY)

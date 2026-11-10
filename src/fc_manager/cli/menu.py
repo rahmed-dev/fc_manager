@@ -34,7 +34,7 @@ from fc_manager.cli.common import (
 )
 from fc_manager.cli.inventory import choose_site
 from fc_manager.cli.root import app
-from fc_manager.errors import FcmError, NotFound, UsageError
+from fc_manager.errors import FcmError, NotFound
 from fc_manager.inventory import Bench, Site, Team
 from fc_manager.output import Output
 
@@ -122,10 +122,7 @@ def first_run() -> str:
     """The first-run setup: add the first profile, as profile-add does. Returns its name."""
     out = Output(json_mode=False)
     if not credentials.keyring_usable():
-        raise UsageError(
-            "No profile is set up, and no secure OS keyring is available on this host",
-            hint=credentials.ENV_HINT,
-        )
+        raise credentials.keyring_error("No profile is set up")
     out.message(WELCOME)
     name = typer.prompt("Profile name", default=SETUP_PROFILE).strip()
     try:

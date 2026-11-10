@@ -15,12 +15,12 @@ You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you 
 system has none.
 
 ```bash
-uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.1.0
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.1.1
 ```
 
 uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
 (`~/.local/bin`). If you use pipx instead, run
-`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.1.0`.
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.1.1`.
 
 ### First run
 
@@ -44,7 +44,7 @@ instead (see [Credentials and security](#credentials-and-security)).
 ### Upgrade and uninstall
 
 ```bash
-uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.1.0   # a newer tag
+uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.1.1   # a newer tag
 fcm --version
 uv tool uninstall fc-manager
 ```
@@ -405,8 +405,9 @@ that the result is not known (exit 6).
   Keychain, Windows Credential Manager, or the Secret Service on Linux). It never writes a
   secret to a plain file.
 - **No keyring?** On a host with no secure keyring (for example a headless Linux server),
-  `fcm profile-add` refuses to store anything. Set the credentials in the environment
-  instead:
+  `fcm profile-add` and the first run ask for nothing and store nothing. This also covers a
+  host where a keyring service runs but cannot open a keyring: `fcm` tests the keyring with
+  one read before it asks for the key. Set the credentials in the environment instead:
 
   ```bash
   export FCM_API_KEY=...       # both variables are needed
@@ -415,6 +416,7 @@ that the result is not known (exit 6).
   ```
 
   When both variables are set, they take precedence over the keyring for that run.
+  The installed `fcm` does not read the `.env` file of `bin/fcm-dev`.
 - **The config file holds no secrets.** It holds the profile names, the default profile and
   the base URL of each profile. Its location is the user config directory, for example
   `~/.config/fc_manager/config.toml` on Linux, with file mode `0600`.
@@ -438,6 +440,27 @@ that the result is not known (exit 6).
   second deploy, migrate, update or install.
 
 To report a security problem, do not open a public issue. Contact the maintainer directly.
+
+### Keyring on a headless Linux host
+
+On a Linux server, `gnome-keyring-daemon` can run with no login keyring. To make one, it
+must show a password prompt, and a server has no prompt. `fcm` then says that the keyring
+"cannot open its default keyring".
+
+You have two options:
+
+1. Set `FCM_API_KEY` and `FCM_API_SECRET` in the environment (see above). This is the
+   simplest way.
+2. Make and unlock a login keyring from a terminal. Then run `fcm` again:
+
+   ```bash
+   read -rsp "Keyring password: " pw; echo
+   printf '%s' "$pw" | gnome-keyring-daemon --unlock   # creates the login keyring if missing
+   unset pw
+   ```
+
+   After a reboot the login keyring is locked again. Run the same commands in each new
+   session before you use `fcm`.
 
 ## Development
 

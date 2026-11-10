@@ -37,8 +37,10 @@ class MemoryKeyring(KeyringBackend):
     def __init__(self) -> None:
         super().__init__()
         self.store: dict[tuple[str, str], str] = {}
+        self.reads: list[tuple[str, str]] = []
 
     def get_password(self, service, username):
+        self.reads.append((service, username))
         return self.store.get((service, username))
 
     def set_password(self, service, username, password):
@@ -55,6 +57,46 @@ def _clean_redaction_registry():
     redact.clear()
     yield
     redact.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_keyring_probe():
+    credentials.reset_probe()
+    yield
+    credentials.reset_probe()
+
+
+class BrokenKeyring(KeyringBackend):
+    """A keyring service that runs but fails every call, as gnome-keyring does with
+    no login keyring on a headless host."""
+
+    priority = 1  # type: ignore[assignment]
+
+    def __init__(self, exc: BaseException | None = None) -> None:
+        super().__init__()
+        self.exc = exc or keyring.errors.InitError("Failed to create the collection")
+        self.reads = 0
+        self.writes = 0
+
+    def get_password(self, service, username):
+        self.reads += 1
+        raise self.exc
+
+    def set_password(self, service, username, password):
+        self.writes += 1
+        raise self.exc
+
+    def delete_password(self, service, username):
+        raise self.exc
+
+
+@pytest.fixture
+def broken_keyring():
+    previous = keyring.get_keyring()
+    backend = BrokenKeyring()
+    keyring.set_keyring(backend)
+    yield backend
+    keyring.set_keyring(previous)
 
 
 @pytest.fixture

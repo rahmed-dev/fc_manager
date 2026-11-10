@@ -62,6 +62,78 @@ def test_unsafe_backends_are_rejected():
     assert credentials.keyring_usable(null.Keyring()) is False
 
 
+# --- keyring-probe: a real read before any prompt ------------------------------------
+
+
+def test_probe_read_failure_means_not_usable(env, broken_keyring):
+    assert credentials.keyring_usable() is False
+    assert broken_keyring.reads == 1 and broken_keyring.writes == 0
+
+
+def test_probe_read_works_and_writes_nothing(env, memkeyring):
+    assert credentials.keyring_usable() is True
+    assert memkeyring.reads == [("fc_manager", credentials.PROBE_ENTRY)]
+    assert memkeyring.store == {}
+
+
+def test_probe_non_keyring_exception_means_not_usable(env):
+    from .conftest import BrokenKeyring
+
+    assert credentials.keyring_usable(BrokenKeyring(OSError("dbus gone"))) is False
+
+
+CAUSES = [
+    (keyring.errors.InitError("x"), "cannot open its default keyring"),
+    (keyring.errors.KeyringLocked("x"), "is locked"),
+    (keyring.errors.NoKeyringError("x"), "has no backend"),
+    (RuntimeError("x"), "does not work (RuntimeError)"),
+]
+
+
+def _assert_plain(err: UsageError, cause: str) -> None:
+    assert cause in err.message
+    assert credentials.ENV_KEY in err.hint and credentials.ENV_SECRET in err.hint
+    assert credentials.README_SECTION in err.hint
+    assert KEY not in err.message + err.hint and SECRET not in err.message + err.hint
+
+
+@pytest.mark.parametrize(("exc", "cause"), CAUSES)
+def test_probe_error_names_the_cause(env, monkeypatch, exc, cause):
+    from .conftest import BrokenKeyring
+
+    monkeypatch.setattr(credentials.sys, "platform", "linux")
+    monkeypatch.setattr(keyring, "get_keyring", lambda: BrokenKeyring(exc))
+    _assert_plain(credentials.keyring_error(), cause)
+
+
+@pytest.mark.parametrize(("exc", "cause"), CAUSES[:3])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: credentials.store("work", Credentials(KEY, SECRET)),
+        lambda: credentials.load("work"),
+        lambda: credentials.delete("work"),
+    ],
+    ids=["store", "load", "delete"],
+)
+def test_store_load_delete_errors_name_the_cause(env, monkeypatch, exc, cause, call):
+    def broken(*_a):
+        raise exc
+
+    for name in ("get_password", "set_password", "delete_password"):
+        monkeypatch.setattr(keyring, name, broken)
+    monkeypatch.setattr(credentials, "keyring_usable", lambda backend=None: True)
+    monkeypatch.setattr(credentials.sys, "platform", "linux")
+    with pytest.raises(UsageError) as info:
+        call()
+    _assert_plain(info.value, cause)
+
+
+def test_hint_has_no_readme_pointer_off_linux(monkeypatch):
+    monkeypatch.setattr(credentials.sys, "platform", "darwin")
+    assert credentials.keyring_hint() == credentials.ENV_HINT
+
+
 def test_store_refuses_without_keyring(env, monkeypatch):
     monkeypatch.setattr(credentials, "keyring_usable", lambda backend=None: False)
     with pytest.raises(UsageError) as info:
@@ -190,6 +262,24 @@ def test_add_without_keyring(env, cli, interactive, typed, monkeypatch):
     assert result.code == 2
     assert credentials.ENV_KEY in result.err
     assert config.load().profiles == {}
+
+
+def test_add_with_broken_keyring_asks_nothing(env, cli, interactive, monkeypatch, broken_keyring):
+    monkeypatch.setattr(profile_cli, "_prompt_key", lambda: pytest.fail("no key prompt"))
+    result = cli("profile-add", "work")
+    assert result.code == 2
+    assert "cannot open its default keyring" in result.err
+    assert credentials.ENV_KEY in result.err
+    assert broken_keyring.writes == 0
+    assert config.load().profiles == {}
+
+
+@respx.mock
+def test_add_reads_the_probe_entry_once(env, cli, interactive, typed, memkeyring):
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    assert cli("profile-add", "work").code == 0
+    probes = [r for r in memkeyring.reads if r[1] == credentials.PROBE_ENTRY]
+    assert len(probes) == 1
 
 
 def test_add_needs_a_terminal(env, cli, typed):

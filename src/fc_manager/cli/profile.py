@@ -71,9 +71,7 @@ def _precheck(name: str, base_url: str, replace: bool) -> tuple[config.Config, s
             hint=f"To change its credentials, run: fcm profile-add {name} --replace",
         )
     if not credentials.keyring_usable():
-        raise UsageError(
-            "No secure OS keyring is available on this host", hint=credentials.ENV_HINT
-        )
+        raise credentials.keyring_error()
     return cfg, base_url
 
 

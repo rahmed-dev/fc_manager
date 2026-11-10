@@ -4,6 +4,18 @@ All notable changes to `fcm` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-11-10
+
+### Fixed
+
+- First run and `profile-add` on a host where a keyring service runs but cannot open a
+  keyring (for example gnome-keyring on a headless server with no login keyring): `fcm` now
+  tests the keyring with one read before it asks for the key. It asks for nothing, says why
+  the keyring does not work, and names `FCM_API_KEY` and `FCM_API_SECRET`. Before, it asked
+  for the key and then failed with `Cannot write to the OS keyring: InitError`.
+- Keyring errors say the cause in plain words (no default keyring, locked, no backend), not
+  only an exception name.
+
 ## [1.1.0] - 2026-11-09
 
 ### Added
