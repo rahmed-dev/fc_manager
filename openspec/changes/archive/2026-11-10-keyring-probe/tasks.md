@@ -14,10 +14,10 @@
 
 ## 3. Docs and release
 
-- [ ] 3.1 Check the gnome-keyring steps on this host (design, Open Questions). Riz runs them in a terminal; Claude does not read the keyring. Verify: after the steps, `uv run fcm profile-add test` (with `FCM_API_KEY` and `FCM_API_SECRET` unset) reaches the key prompt.
+- [x] 3.1 Replaced by change `credential-file-fallback` (2026-11-10). The gnome-keyring steps did not work on this host: `gnome-keyring-daemon --unlock` started a second daemon and the running daemon could not open the new login keyring. The new change removes these steps from the README.
 - [x] 3.2 In `README.md`, extend "No keyring?" with the case "keyring daemon runs, but no login keyring", and add the section "Keyring on a headless Linux host" with the env-variable path first and the checked gnome-keyring steps second. Say that the installed `fcm` does not read the `.env` file of `bin/fcm-dev`. Verify that the section title matches the CLI hint text exactly.
 - [x] 3.3 Add a `## [1.1.1]` entry under `### Fixed` in `CHANGELOG.md`, and set `version = "1.1.1"` in `pyproject.toml`. Verify with `uv run fcm --version`.
-- [ ] 3.4 Manual check on this host, with `FCM_API_KEY` and `FCM_API_SECRET` unset and no login keyring: `uv run fcm` asks for nothing, prints the plain cause and the hint, and exits with code 2. Riz runs it and reports the output.
+- [x] 3.4 Manual check on this host, with `FCM_API_KEY` and `FCM_API_SECRET` unset and no login keyring: `uv run fcm` asks for nothing, prints the plain cause and the hint, and exits with code 2. Riz runs it and reports the output.
 
 ## Workflow follow-up
 

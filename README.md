@@ -15,12 +15,12 @@ You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you 
 system has none.
 
 ```bash
-uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.1.1
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.2.0
 ```
 
 uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
 (`~/.local/bin`). If you use pipx instead, run
-`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.1.1`.
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.2.0`.
 
 ### First run
 
@@ -38,13 +38,14 @@ keyring, and opens the menu. After that, `fcm` opens the menu at once.
 The secret prompt shows what you type or paste, so you can check the paste. The secret then
 stays in your terminal scrollback: on a shared screen, clear the terminal after the setup.
 
-On a server with no keyring, set `FCM_API_KEY` and `FCM_API_SECRET` in the environment
-instead (see [Credentials and security](#credentials-and-security)).
+On a host where no keyring works (for example a headless Linux server), `fcm` says why
+after the FC check, and asks if it can save the secret in a file that only you can read.
+See [Keyring on a headless Linux host](#keyring-on-a-headless-linux-host).
 
 ### Upgrade and uninstall
 
 ```bash
-uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.1.1   # a newer tag
+uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.2.0   # a newer tag
 fcm --version
 uv tool uninstall fc-manager
 ```
@@ -143,7 +144,7 @@ every team that the login is a member of. You do not list teams yourself; `fcm` 
 Other profile commands:
 
 ```bash
-fcm profile-list                  # names, default marker, base URL (never credentials)
+fcm profile-list                  # names, default marker, base URL, store (never credentials)
 fcm profile-test work             # check the key with FC, show the teams
 fcm profile-add work --replace    # give a profile a new key
 fcm profile-remove work           # asks for confirmation; --yes skips the question
@@ -401,13 +402,14 @@ that the result is not known (exit 6).
 
 ## Credentials and security
 
-- **Keyring only.** `fcm` stores the API key and the API secret in the OS keyring (macOS
-  Keychain, Windows Credential Manager, or the Secret Service on Linux). It never writes a
-  secret to a plain file.
-- **No keyring?** On a host with no secure keyring (for example a headless Linux server),
-  `fcm profile-add` and the first run ask for nothing and store nothing. This also covers a
-  host where a keyring service runs but cannot open a keyring: `fcm` tests the keyring with
-  one read before it asks for the key. Set the credentials in the environment instead:
+- **Keyring first.** `fcm` stores the API key and the API secret in the OS keyring (macOS
+  Keychain, Windows Credential Manager, or the Secret Service on Linux).
+- **No keyring? A file, only with your yes.** After FC accepts the key, `fcm` tests the
+  keyring with one read. If the keyring does not work, `fcm` says why and asks:
+  `Save the key in ~/.config/fc_manager/credentials (mode 0600, only you can read it)? [y/N]`.
+  On yes, the key and the secret go into that file as plain text, mode `0600`, and
+  `fcm profile-list` shows the store `file`. `fcm` refuses the file when other users can
+  read it. On no, `fcm` saves nothing. The other option is the environment:
 
   ```bash
   export FCM_API_KEY=...       # both variables are needed
@@ -417,8 +419,8 @@ that the result is not known (exit 6).
 
   When both variables are set, they take precedence over the keyring for that run.
   The installed `fcm` does not read the `.env` file of `bin/fcm-dev`.
-- **The config file holds no secrets.** It holds the profile names, the default profile and
-  the base URL of each profile. Its location is the user config directory, for example
+- **The config file holds no secrets.** It holds the profile names, the default profile,
+  and the base URL and the store of each profile. Its location is the user config directory, for example
   `~/.config/fc_manager/config.toml` on Linux, with file mode `0600`.
 - **The secret is never a command-line argument**, so it does not go into your shell history.
 - **Redaction.** `fcm` masks the key, the secret and the `Authorization` header in all
@@ -449,18 +451,13 @@ must show a password prompt, and a server has no prompt. `fcm` then says that th
 
 You have two options:
 
-1. Set `FCM_API_KEY` and `FCM_API_SECRET` in the environment (see above). This is the
-   simplest way.
-2. Make and unlock a login keyring from a terminal. Then run `fcm` again:
+1. Answer `y` to the file question in the setup or in `fcm profile-add`. The secret goes
+   into `~/.config/fc_manager/credentials` (mode `0600`). Anyone with root on the host, and
+   any backup of your home directory, can read it.
+2. Answer `N`, and set `FCM_API_KEY` and `FCM_API_SECRET` in the environment (see above).
 
-   ```bash
-   read -rsp "Keyring password: " pw; echo
-   printf '%s' "$pw" | gnome-keyring-daemon --unlock   # creates the login keyring if missing
-   unset pw
-   ```
-
-   After a reboot the login keyring is locked again. Run the same commands in each new
-   session before you use `fcm`.
+To move a file profile to the keyring later, run `fcm profile-add <name> --replace` on a
+host where the keyring works. `fcm` then removes the entry from the file.
 
 ## Development
 

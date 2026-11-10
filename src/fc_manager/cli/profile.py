@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Annotated
 
@@ -61,7 +62,8 @@ def _check_token(value: str, what: str) -> None:
 
 
 def _precheck(name: str, base_url: str, replace: bool) -> tuple[config.Config, str]:
-    """The checks before any prompt: name, base URL, duplicate, keyring."""
+    """The checks before any prompt: name, base URL, duplicate. The keyring check
+    comes later, after FC accepts the key, so the user always gets the prompts."""
     _check_name(name)
     base_url = validate_base_url(base_url)
     cfg = config.load()
@@ -70,8 +72,6 @@ def _precheck(name: str, base_url: str, replace: bool) -> tuple[config.Config, s
             f"Profile {name} already exists",
             hint=f"To change its credentials, run: fcm profile-add {name} --replace",
         )
-    if not credentials.keyring_usable():
-        raise credentials.keyring_error()
     return cfg, base_url
 
 
@@ -84,7 +84,8 @@ def add_profile(
     debug: bool = False,
 ):
     """Ask for the key and the secret, check them with FC (read-only), then store
-    the secret in the keyring and the profile in the config file. The first profile
+    the secret and the profile in the config file. The secret goes to the keyring; when
+    no keyring works, to the credentials file after the user says yes. The first profile
     becomes the default. Returns the FC account. Used by profile-add and the first run."""
     cfg, base_url = _precheck(name, base_url, replace)
     creds = Credentials(_prompt_key().strip(), _prompt_secret().strip())
@@ -96,12 +97,40 @@ def add_profile(
     with FCClient(creds, base_url, profile=name, debug=out.debug if debug else None) as client:
         account = Inventory(client).account()
 
-    credentials.store(name, creds)
-    cfg.profiles[name] = config.Profile(name=name, base_url=base_url)
+    store = _save_secret(out, name, creds)
+    old = cfg.profiles.get(name)
+    if old is not None and old.store != store:
+        _forget_old_entry(name, old.store)
+    cfg.profiles[name] = config.Profile(name=name, base_url=base_url, store=store)
     if not cfg.default_profile:
         cfg.default_profile = name
     config.save(cfg)
     return account
+
+
+def _save_secret(out: Output, name: str, creds: Credentials) -> str:
+    """Save the secret in the keyring, or in the credentials file after a yes.
+    Returns the store."""
+    cause = credentials.keyring_problem()
+    if cause is None:
+        credentials.store(name, creds)
+        return config.STORE_KEYRING
+    path = credentials.file_path()
+    out.message(f"No working OS keyring on this host: the OS keyring {cause}.")
+    if not _confirm(f"Save the key in {path} (mode 0600, only you can read it)?"):
+        raise credentials.KeyringDeclined(
+            "Nothing was saved: no working OS keyring, and no credentials file",
+            hint=credentials.keyring_hint(),
+        )
+    credentials.file_store(name, creds)
+    return config.STORE_FILE
+
+
+def _forget_old_entry(name: str, store: str) -> None:
+    """--replace moved the profile to another store: remove the old entry. A broken
+    keyring does not stop the save."""
+    with contextlib.suppress(UsageError):
+        credentials.delete(name, store)
 
 
 @app.command("profile-add", rich_help_panel="Profile")
@@ -145,10 +174,16 @@ def list_(json_mode: JsonOpt = False, debug: DebugOpt = False) -> None:
             Column("Profile", lambda p: p.name),
             Column("Default", lambda p: "*" if p.name == cfg.default_profile else ""),
             Column("Base URL", lambda p: p.base_url),
+            Column("Store", lambda p: p.store),
         ],
         profiles,
         json_rows=[
-            {"name": p.name, "default": p.name == cfg.default_profile, "base_url": p.base_url}
+            {
+                "name": p.name,
+                "default": p.name == cfg.default_profile,
+                "base_url": p.base_url,
+                "store": p.store,
+            }
             for p in profiles
         ],
         summary=count(len(profiles), "profile"),
@@ -161,7 +196,7 @@ def test(name: NameArg, json_mode: JsonOpt = False, debug: DebugOpt = False) -> 
     """Check a stored profile against FC and show the teams it reaches."""
     out = Output(json_mode=json_mode)
     profile = _require_profile(config.load(), name)
-    creds = credentials.load(name)
+    creds = credentials.load(name, profile.store)
     with FCClient(
         creds, profile.base_url, profile=name, debug=out.debug if debug else None
     ) as client:
@@ -187,19 +222,20 @@ def remove(
     json_mode: JsonOpt = False,
     debug: DebugOpt = False,
 ) -> None:
-    """Remove a profile and delete its keyring entry."""
+    """Remove a profile and delete its stored key (keyring or credentials file)."""
     out = Output(json_mode=json_mode)
     cfg = config.load()
-    _require_profile(cfg, name)
+    profile = _require_profile(cfg, name)
+    where = "keyring entry" if profile.store == config.STORE_KEYRING else "credentials file entry"
     if not yes:
         if not picker.is_interactive(json_mode):
             raise UsageError(
                 f"Removing profile {name} needs confirmation", hint="Pass --yes to confirm."
             )
-        if not _confirm(f"Remove profile {name} and delete its keyring entry?"):
+        if not _confirm(f"Remove profile {name} and delete its {where}?"):
             out.message("Cancelled, nothing changed.")
             return
-    credentials.delete(name)
+    credentials.delete(name, profile.store)
     del cfg.profiles[name]
     if cfg.default_profile == name:
         cfg.default_profile = min(cfg.profiles) if cfg.profiles else None

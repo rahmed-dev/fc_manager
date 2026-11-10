@@ -256,24 +256,6 @@ def test_add_rejects_http_base_url(env, cli, interactive, typed):
     assert "HTTPS" in result.err
 
 
-def test_add_without_keyring(env, cli, interactive, typed, monkeypatch):
-    monkeypatch.setattr(credentials, "keyring_usable", lambda backend=None: False)
-    result = cli("profile-add", "work")
-    assert result.code == 2
-    assert credentials.ENV_KEY in result.err
-    assert config.load().profiles == {}
-
-
-def test_add_with_broken_keyring_asks_nothing(env, cli, interactive, monkeypatch, broken_keyring):
-    monkeypatch.setattr(profile_cli, "_prompt_key", lambda: pytest.fail("no key prompt"))
-    result = cli("profile-add", "work")
-    assert result.code == 2
-    assert "cannot open its default keyring" in result.err
-    assert credentials.ENV_KEY in result.err
-    assert broken_keyring.writes == 0
-    assert config.load().profiles == {}
-
-
 @respx.mock
 def test_add_reads_the_probe_entry_once(env, cli, interactive, typed, memkeyring):
     respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
@@ -303,7 +285,7 @@ def test_list_shows_names_and_default_without_credentials(env, cli):
 def test_list_json(env, cli):
     save_profile("work")
     rows = json.loads(cli("profile-list", "--json").out)
-    assert rows == [{"name": "work", "default": True, "base_url": BASE}]
+    assert rows == [{"name": "work", "default": True, "base_url": BASE, "store": "keyring"}]
 
 
 def test_list_empty(env, cli):
@@ -388,3 +370,150 @@ def test_secret_prompt_shows_the_typed_text(monkeypatch):
     profile_cli._prompt_secret()
     assert seen["text"] == "FC API secret"
     assert not seen.get("hide_input")
+
+
+# --- credential-file-fallback ------------------------------------------------------------
+
+
+def test_config_store_round_trip_and_old_config(env):
+    cfg = config.Config(
+        default_profile="a",
+        profiles={"a": config.Profile("a", BASE, "file"), "b": config.Profile("b", BASE)},
+    )
+    path = config.save(cfg)
+    assert 'store = "file"' in path.read_text() and path.read_text().count("store") == 1
+    loaded = config.load()
+    assert loaded.profiles["a"].store == "file" and loaded.profiles["b"].store == "keyring"
+
+
+def test_config_unknown_store_is_refused(env):
+    path = config.config_path()
+    path.parent.mkdir(parents=True)
+    path.write_text('[profiles.a]\nbase_url = "https://x"\nstore = "cloud"\n')
+    with pytest.raises(UsageError):
+        config.load()
+
+
+def test_file_store_mode_and_two_profiles(env, broken_keyring):
+    credentials.file_store("a", Credentials(KEY, SECRET))
+    credentials.file_store("b", Credentials("key-b", "secret-b"))
+    path = credentials.file_path()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert credentials.load("a", "file").api_secret == SECRET
+    assert credentials.load("b", "file").api_key == "key-b"
+    assert broken_keyring.reads == 0  # a file load does not touch the keyring
+    credentials.delete("a", "file")
+    assert credentials.load("b", "file").api_key == "key-b"
+    with pytest.raises(UsageError) as info:
+        credentials.load("a", "file")
+    assert "--replace" in info.value.hint
+    credentials.delete("b", "file")
+    assert not path.exists()
+    assert broken_keyring.reads == 0
+
+
+def test_file_readable_by_others_is_refused(env):
+    credentials.file_store("a", Credentials(KEY, SECRET))
+    path = credentials.file_path()
+    path.chmod(0o644)
+    with pytest.raises(UsageError) as info:
+        credentials.load("a", "file")
+    assert f"chmod 600 {path}" in info.value.hint
+    assert SECRET not in info.value.message + info.value.hint
+
+
+@pytest.fixture
+def answer(monkeypatch):
+    """Record the file question and answer it."""
+    asked = []
+
+    def set_answer(value: bool):
+        def confirm(question):
+            asked.append(question)
+            return value
+
+        monkeypatch.setattr(profile_cli, "_confirm", confirm)
+
+    set_answer(False)
+    return asked, set_answer
+
+
+@respx.mock
+def test_add_broken_keyring_yes_saves_a_file_profile(
+    env, cli, interactive, typed, answer, broken_keyring
+):
+    asked, set_answer = answer
+    set_answer(True)
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    result = cli("profile-add", "work")
+    assert result.code == 0, result.err
+    assert "cannot open its default keyring" in result.out
+    assert len(asked) == 1 and "mode 0600" in asked[0]
+    assert config.load().profiles["work"].store == "file"
+    assert credentials.load("work", "file").api_secret == SECRET
+    assert SECRET not in result.out + result.err
+    assert broken_keyring.writes == 0
+    listed = json.loads(cli("profile-list", "--json").out)
+    assert listed[0]["store"] == "file"
+
+
+@respx.mock
+def test_add_broken_keyring_no_saves_nothing(env, cli, interactive, typed, answer, broken_keyring):
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    result = cli("profile-add", "work")
+    assert result.code == 2
+    assert credentials.ENV_KEY in result.err and credentials.ENV_SECRET in result.err
+    assert config.load().profiles == {}
+    assert not credentials.file_path().exists()
+
+
+@respx.mock
+def test_add_prompts_come_before_the_keyring_message(
+    env, cli, interactive, answer, broken_keyring, monkeypatch
+):
+    order = []
+    monkeypatch.setattr(profile_cli, "_prompt_key", lambda: order.append("key") or KEY)
+    monkeypatch.setattr(profile_cli, "_prompt_secret", lambda: order.append("secret") or SECRET)
+    route = respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    cli("profile-add", "work")
+    assert order == ["key", "secret"] and route.called
+
+
+@respx.mock
+def test_add_working_keyring_asks_no_file_question(env, cli, interactive, typed, answer):
+    asked, _ = answer
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    assert cli("profile-add", "work").code == 0
+    assert asked == []
+    assert config.load().profiles["work"].store == "keyring"
+    assert not credentials.file_path().exists()
+
+
+@respx.mock
+def test_replace_moves_a_file_profile_to_the_keyring(
+    env, cli, interactive, typed, answer, memkeyring
+):
+    cfg = config.Config(
+        default_profile="work", profiles={"work": config.Profile("work", BASE, "file")}
+    )
+    config.save(cfg)
+    credentials.file_store("work", Credentials("old-key-0000", "old-secret-0000"))
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    assert cli("profile-add", "work", "--replace").code == 0
+    assert config.load().profiles["work"].store == "keyring"
+    assert credentials.load("work").api_secret == SECRET
+    assert not credentials.file_path().exists()
+
+
+def test_remove_file_profile_keeps_others_and_skips_keyring(env, cli, broken_keyring):
+    cfg = config.Config(
+        default_profile="a",
+        profiles={"a": config.Profile("a", BASE, "file"), "b": config.Profile("b", BASE, "file")},
+    )
+    config.save(cfg)
+    credentials.file_store("a", Credentials(KEY, SECRET))
+    credentials.file_store("b", Credentials("key-b", "secret-b"))
+    assert cli("profile-remove", "a", "--yes").code == 0
+    assert credentials.load("b", "file").api_key == "key-b"
+    assert broken_keyring.reads == 0

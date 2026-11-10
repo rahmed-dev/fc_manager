@@ -61,27 +61,6 @@ def test_first_run_rejected_key_stores_nothing(terminal, cli, memkeyring):
     assert opened == []
 
 
-def test_first_run_without_keyring_asks_nothing(terminal, cli, monkeypatch):
-    asked, opened = terminal
-    monkeypatch.setattr(credentials, "keyring_usable", lambda backend=None: False)
-    result = cli()
-    assert result.code == 2
-    assert credentials.ENV_KEY in result.err and credentials.ENV_SECRET in result.err
-    assert asked == [] and opened == []
-
-
-def test_first_run_with_broken_keyring_asks_nothing(terminal, cli, broken_keyring):
-    """keyring-probe: the keyring service runs, but a read fails (no login keyring)."""
-    asked, opened = terminal
-    result = cli()
-    assert result.code == 2
-    assert "cannot open its default keyring" in result.err
-    assert credentials.ENV_KEY in result.err and credentials.ENV_SECRET in result.err
-    assert "Run fcm again" not in result.err
-    assert asked == [] and opened == []
-    assert broken_keyring.writes == 0
-
-
 def test_env_credentials_skip_the_setup(terminal, cli, monkeypatch):
     asked, opened = terminal
     monkeypatch.setenv(credentials.ENV_KEY, KEY)
@@ -151,3 +130,31 @@ def test_pasted_label_or_pair_is_refused_before_fc(env, cli, monkeypatch, memkey
     assert "does not look like an FC API" in result.err and "Nothing was sent" in result.err
     assert "def456" not in result.err and "abc123" not in result.err
     assert memkeyring.store == {}
+
+
+@respx.mock
+def test_first_run_broken_keyring_yes_saves_and_opens_the_menu(
+    terminal, cli, broken_keyring, monkeypatch
+):
+    """credential-file-fallback: prompts, FC check, file question, menu."""
+    asked, opened = terminal
+    monkeypatch.setattr(profile_cli, "_confirm", lambda question: True)
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    result = cli()
+    assert result.code == 0, result.err
+    assert asked == [("Profile name", "default")]
+    assert "cannot open its default keyring" in result.out
+    assert config.load().profiles["default"].store == "file"
+    assert opened == ["default"]
+
+
+@respx.mock
+def test_first_run_broken_keyring_no_keeps_the_env_hint(terminal, cli, broken_keyring, monkeypatch):
+    asked, opened = terminal
+    monkeypatch.setattr(profile_cli, "_confirm", lambda question: False)
+    respx.get(method_url("press.api.account.get")).respond(json=fixture("account_get.json"))
+    result = cli()
+    assert result.code == 2
+    assert credentials.ENV_KEY in result.err and credentials.ENV_SECRET in result.err
+    assert "Run fcm again" not in result.err
+    assert config.load().profiles == {} and opened == []

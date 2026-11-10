@@ -4,6 +4,21 @@ All notable changes to `fcm` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-10
+
+### Changed
+
+- The first run and `profile-add` ask for the key again on a host where no keyring works
+  (1.1.1 stopped before the prompts). After FC accepts the key, `fcm` says why the keyring
+  does not work and asks to save the key in `~/.config/fc_manager/credentials` (mode 0600).
+  The default answer is No: then nothing is saved.
+- `profile-list` shows the store of each profile (`keyring` or `file`). `profile-remove`
+  and `profile-add --replace` handle both stores.
+
+### Removed
+
+- The gnome-keyring steps in the README. They did not work on a headless host.
+
 ## [1.1.1] - 2026-11-10
 
 ### Fixed

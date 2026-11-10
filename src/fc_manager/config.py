@@ -15,6 +15,10 @@ from fc_manager.errors import UsageError
 APP_NAME = "fc_manager"
 CONFIG_DIR_ENV = "FCM_CONFIG_DIR"
 
+STORE_KEYRING = "keyring"
+STORE_FILE = "file"
+STORES = (STORE_KEYRING, STORE_FILE)
+
 
 def config_path() -> Path:
     override = os.environ.get(CONFIG_DIR_ENV)
@@ -26,6 +30,7 @@ def config_path() -> Path:
 class Profile:
     name: str
     base_url: str
+    store: str = STORE_KEYRING  # where the secret is: the OS keyring or the credentials file
 
 
 @dataclass
@@ -37,8 +42,15 @@ class Config:
         data: dict = {}
         if self.default_profile:
             data["default_profile"] = self.default_profile
-        data["profiles"] = {p.name: {"base_url": p.base_url} for p in self.profiles.values()}
+        data["profiles"] = {p.name: _profile_toml(p) for p in self.profiles.values()}
         return data
+
+
+def _profile_toml(profile: Profile) -> dict:
+    data = {"base_url": profile.base_url}
+    if profile.store != STORE_KEYRING:  # an old or a keyring profile has no store line
+        data["store"] = profile.store
+    return data
 
 
 def load(path: Path | None = None) -> Config:
@@ -53,7 +65,13 @@ def load(path: Path | None = None) -> Config:
     for name, values in (data.get("profiles") or {}).items():
         if not isinstance(values, dict) or "base_url" not in values:
             raise UsageError(f"Config file {path}: profile {name!r} has no base_url")
-        profiles[name] = Profile(name=name, base_url=str(values["base_url"]))
+        store = values.get("store", STORE_KEYRING)
+        if store not in STORES:
+            raise UsageError(
+                f"Config file {path}: profile {name!r} has an unknown store {store!r}",
+                hint=f"Use one of: {', '.join(STORES)}",
+            )
+        profiles[name] = Profile(name=name, base_url=str(values["base_url"]), store=store)
     default = data.get("default_profile")
     return Config(default_profile=default if default in profiles else None, profiles=profiles)
 

@@ -105,7 +105,8 @@ SETUP_PROFILE = "default"
 WELCOME = (
     "Welcome to fcm. No profile is set up yet.\n"
     "A profile holds one FC API key and secret. To make one, open the FC dashboard:\n"
-    "Settings > Profile & Team > API Access. The secret goes into the OS keyring only."
+    "Settings > Profile & Team > API Access. The secret goes into the OS keyring.\n"
+    "If no keyring works on this host, fcm asks before it saves the secret in a file."
 )
 
 
@@ -121,12 +122,12 @@ def needs_setup(profile_option: str | None) -> bool:
 def first_run() -> str:
     """The first-run setup: add the first profile, as profile-add does. Returns its name."""
     out = Output(json_mode=False)
-    if not credentials.keyring_usable():
-        raise credentials.keyring_error("No profile is set up")
     out.message(WELCOME)
     name = typer.prompt("Profile name", default=SETUP_PROFILE).strip()
     try:
         account = profile_cli.add_profile(out, name)
+    except credentials.KeyringDeclined:
+        raise  # keeps the environment-variable hint
     except FcmError as err:  # nothing was saved: the retry is the setup itself
         err.hint = "Nothing was saved. Run fcm again to retry the setup."
         raise
