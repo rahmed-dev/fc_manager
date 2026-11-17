@@ -36,13 +36,8 @@ from fc_manager.api.client import FCClient
 from fc_manager.deploy import DeployService
 from fc_manager.errors import InstallFailed, InstallUnknown, UsageError
 from fc_manager.inventory import Bench, Site
-from fc_manager.migrate import (
-    IN_PROGRESS,
-    POLL_SECONDS,
-    MigrateService,
-    MigrateState,
-    watch_site_job,
-)
+from fc_manager.jobs import IN_PROGRESS, POLL_SECONDS
+from fc_manager.migrate import MigrateService, MigrateState, watch_site_job
 from fc_manager.search import SearchIndex
 
 ADD_METHOD = "press.api.bench.add_apps"

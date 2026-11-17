@@ -9,6 +9,10 @@ profile > team > bench, and > site after the site step of a site action.
 A new action is one `Action` entry in `ACTIONS`. A site action gets the site step (a site
 of the picked bench) before it runs. Its `site_filter` can narrow that list, with
 `site_empty` as the message when no site is left.
+
+After the actions, the action menu offers "Pick another bench" (back to the bench step),
+"Pick another team" (back to the team step, only when the profile reaches more than one
+team) and "Quit".
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ from fc_manager.errors import FcmError, NotFound
 from fc_manager.inventory import Bench, Site, Team
 from fc_manager.output import Output
 
-OTHER_BENCH, QUIT = "bench", "quit"
+OTHER_BENCH, OTHER_TEAM, QUIT = "bench", "team", "quit"
 
 
 @dataclass(frozen=True)
@@ -181,8 +185,11 @@ def run(profile: str | None) -> None:
             if bench is None:  # no bench in this team
                 team = None
                 continue
-            if _action_loop(s, team, bench) == QUIT:
+            choice = _action_loop(s, team, bench, many=many)
+            if choice == QUIT:
                 return
+            if choice == OTHER_TEAM:
+                team = None  # the team picker reuses the list read above: no FC request
 
 
 def _bench_step(s: Session, team: Team, *, back: bool) -> Bench | None:
@@ -198,11 +205,16 @@ def _bench_step(s: Session, team: Team, *, back: bool) -> Bench | None:
     return picker.choose("Bench", options, back=back, path=target_path(s, team))
 
 
-def _action_loop(s: Session, team: Team, bench: Bench) -> str:
-    """Run actions on one bench until the user goes back (OTHER_BENCH) or quits (QUIT)."""
+def _action_loop(s: Session, team: Team, bench: Bench, *, many: bool) -> str:
+    """Run actions on one bench until the user goes back (OTHER_BENCH), picks another team
+    (OTHER_TEAM, offered only when `many`: the profile reaches more than one team), or
+    quits (QUIT)."""
     path = target_path(s, team, bench)
     entries = [(a.title, a) for a in ACTIONS]
-    entries += [("Pick another bench", OTHER_BENCH), ("Quit", QUIT)]
+    entries.append(("Pick another bench", OTHER_BENCH))
+    if many:
+        entries.append(("Pick another team", OTHER_TEAM))
+    entries.append(("Quit", QUIT))
     while True:
         try:
             action = picker.choose("Action", entries, back=True, path=path)

@@ -7,37 +7,33 @@ from rich.console import Console
 
 from fc_manager.cli import picker
 from fc_manager.cli import update as update_cli
-from fc_manager.migrate import JobStep
+from fc_manager.jobs import JobState, JobStep
 from fc_manager.update import UpdateState
 
 from .conftest import _site, save_profile
 
 SITE = "erp.acme.example.com"
-STEPS = ["Deactivate Site", "Backup Site", "Move Site", "Migrate Site", "Activate Site"]
+TOO_MANY = 'mariadb-dump: Got error: 1040: "Too many connections" when trying to connect'
+RECOVER = "Recover Failed Site Update"
 
 
-def rec(status, steps=("Success",) * 5, recover_job=None, name="su-new") -> dict:
-    return {
-        "name": name,
-        "status": status,
-        "source_bench": "bench-1234-000001-f1",
-        "destination_bench": "bench-1234-000002-f1",
-        "recover_job": recover_job,
-        "steps": [
-            {"title": t, "status": st, "output": "patch x failed"}
-            for t, st in zip(STEPS, steps, strict=False)
-        ],
-    }
+def doc(status, name="job-new", job_type="Update Site Migrate") -> dict:
+    """A site.job answer. Failure fails at "Backup Site Tables", as the live job did."""
+    steps = [
+        {"step_name": "Backup Site Tables", "status": status, "output": "", "duration": "3"},
+        {"step_name": "Move Site", "status": status, "output": "", "duration": ""},
+    ]
+    if status == "Failure":
+        steps[0]["output"] = TOO_MANY
+        steps[1]["status"] = "Skipped"
+    return {"name": name, "job_type": job_type, "status": status, "steps": steps}
 
 
 @pytest.fixture
 def ufc(env, fc, monkeypatch):
     """Fake FC with site erp.acme.example.com (bench-1234, team-acme, has an update)."""
     save_profile()
-    fc.update_records = [
-        rec("Running", ("Success", "Success", "Running", "Pending", "Pending")),
-        rec("Success"),
-    ]
+    fc.job_docs = {"job-new": [doc("Running"), doc("Success")]}
     monkeypatch.setattr(update_cli.time, "sleep", lambda _s: None)
     return fc
 
@@ -136,7 +132,7 @@ def test_confirmed_update_success(ufc, cli):
     ]
     assert writes(ufc) == ["press.api.site.update"]
     assert "the site is updated" in result.out
-    assert "bench-1234-000002-f1" in result.out
+    assert "New bench" not in result.out  # the site jobs do not name the new bench
 
 
 def test_skip_flag_reaches_fc(ufc, cli):
@@ -155,32 +151,58 @@ def test_no_wait(ufc, cli):
     assert len(ufc.update_posts) == 1
 
 
-FAILED = ("Success", "Success", "Success", "Failure", "Pending")
+def set_site_status(fc, status):
+    for rows in fc.sites.values():
+        for row in rows:
+            if row["name"] == SITE:
+                row["status"] = status
 
 
 @pytest.mark.parametrize(
-    "status,text",
+    "outcome,text",
     [
-        ("Recovered", "FC restored the site to the old bench"),
-        ("Fatal", "FC could not restore the site"),
-        ("Cancelled", "The update was cancelled on FC"),
+        ("recovered", "FC restored the site to the old bench"),
+        ("fatal", "FC could not restore the site"),
+        ("failure", "FC started no recovery"),
     ],
 )
-def test_failed_update_exits_8(ufc, cli, status, text):
-    ufc.update_records = [rec("Failure", FAILED), rec(status, FAILED, recover_job="job-9")]
+def test_failed_update_exits_8(ufc, cli, monkeypatch, outcome, text):
+    ufc.job_docs = {"job-new": [doc("Failure")]}
+    ufc.job_docs["job-9"] = [doc("Failure", "job-9", RECOVER)]
+
+    def after_post(fc):  # the FC state after the update request
+        if outcome == "fatal":
+            fc.other_jobs = [{"name": "job-9", "job_type": RECOVER, "status": "Running"}]
+        if outcome == "failure":
+            set_site_status(fc, "Updating")
+
+    ufc.on_update_post = after_post
+    if outcome == "failure":
+        monkeypatch.setattr("fc_manager.jobs.RECOVERY_LIMIT_SECONDS", 0.0)
     result = cli("site-update", SITE, "--confirm", SITE)
-    assert result.code == 8
+    assert result.code == 8, result.err
     assert text in result.err
-    if status != "Cancelled":
-        assert "Migrate Site" in result.err
-    if status == "Fatal":
+    assert "Update Site Migrate" in result.err
+    assert "Backup Site Tables" in result.err
+    assert "Too many connections" in result.err
+    if outcome == "fatal":
         assert "FC support" in result.err
         assert "Site status on FC" in result.err
     assert len(ufc.update_posts) == 1
 
 
-def test_missing_record_name_exits_6(ufc, cli):
+def test_missing_record_name_still_watches(ufc, cli):
     ufc.update_answer = None
+    result = cli("site-update", SITE, "--confirm", SITE)
+    assert result.code == 0, result.err
+    assert f"FC accepted the update of {SITE}." in result.out
+    assert "the site is updated" in result.out
+    assert len(ufc.update_posts) == 1
+
+
+def test_no_update_job_exits_6(ufc, cli, monkeypatch):
+    monkeypatch.setattr("fc_manager.update.FIND_LIMIT_SECONDS", 0.0)
+    ufc.update_makes_job = False
     result = cli("site-update", SITE, "--confirm", SITE)
     assert result.code == 6
     assert "not known" in result.err
@@ -205,6 +227,7 @@ def test_json_events(ufc, cli):
     assert lines[0]["record"] == "su-new"
     assert lines[-1]["event"] == "result"
     assert lines[-1]["stage"] == "success"
+    assert lines[-1]["jobs"][0]["job_type"] == "Update Site Migrate"
 
 
 def test_ctrl_c_during_watch(ufc, cli, monkeypatch):
@@ -329,7 +352,8 @@ def test_update_view_shows_steps_and_liveness():
     steps = (JobStep("Backup Site", "Success", ""), JobStep("Move Site", "Running", ""))
     now = [100.0]
     view = update_cli.watch_view(SITE, clock=lambda: now[0])
-    view.update(UpdateState(stage="running", steps=steps, checked_at=100.0, polls=3))
+    job = JobState(stage="running", job="job-new", job_type="Update Site Migrate", steps=steps)
+    view.update(UpdateState(stage="running", jobs=(job,), expected=job, checked_at=100.0, polls=3))
     now[0] = 104.0
     text = _render(view)
     assert f"Update {SITE}: FC is updating the site - Move Site" in text

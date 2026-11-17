@@ -18,56 +18,35 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fc_manager.api.client import FCClient
 from fc_manager.errors import FcmError, MigrateFailed, MigrateUnknown, UsageError
 from fc_manager.inventory import Site
-from fc_manager.redact import redact
+from fc_manager.jobs import (  # noqa: F401 - re-exported for the callers of migrate
+    IN_PROGRESS,
+    JOB_DONE,
+    POLL_SECONDS,
+    JobRow,
+    JobSpec,
+    JobState,
+    JobStep,
+    SiteJobWatch,
+    _str,
+    parse_job,
+    parse_running_jobs,
+)
 
 MIGRATE_METHOD = "press.api.site.migrate"
 JOB_TYPE = "Migrate Site"
 # FC lets a migrate run only in these site states (press Site.migrate, @site_action).
 MIGRATE_STATUSES = ("Active", "Inactive", "Broken")
-IN_PROGRESS = ("Pending", "Running", "Undelivered")
-JOB_DONE = ("Success", "Failure")
-POLL_SECONDS = 2.0
 # After FC accepts the request, the new job must show up within this time.
 FIND_LIMIT_SECONDS = 120.0
-OUTPUT_CHARS = 500
-
-
-def _str(value: Any) -> str:
-    return "" if value is None else str(value)
-
-
-def _status(value: Any) -> str:
-    """FC shows an "Undelivered" job as "Pending" in its dashboard. So does fcm."""
-    text = _str(value)
-    return "Pending" if text == "Undelivered" else text
 
 
 # --- data -----------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class JobRow:
-    name: str
-    job_type: str
-    status: str
-
-
-@dataclass(frozen=True)
-class JobStep:
-    step: str
-    status: str
-    duration: str
-    output: str = ""
-
-    @property
-    def label(self) -> str:
-        return self.step
 
 
 @dataclass(frozen=True)
@@ -80,70 +59,7 @@ class MigratePlan:
         return {"name": self.site.name, "skip_failing_patches": self.skip_failing_patches}
 
 
-@dataclass(frozen=True)
-class MigrateState:
-    """One look at a migrate. `stage` is one of: finding (FC accepted the request; the
-    new job is not visible yet), waiting (the job is queued), running, success, failure."""
-
-    stage: str
-    job: str = ""
-    status: str = ""
-    steps: tuple[JobStep, ...] = ()
-    site_status: str = ""  # read once after the job ends
-    # Liveness of the watch: when FC last answered, and how many polls ran.
-    checked_at: float = field(default=0.0, compare=False)
-    polls: int = field(default=0, compare=False)
-
-    @property
-    def final(self) -> bool:
-        return self.stage in ("success", "failure")
-
-    @property
-    def failed_step(self) -> JobStep | None:
-        return next((s for s in self.steps if s.status == "Failure"), None)
-
-    @property
-    def current_step(self) -> JobStep | None:
-        running = next((s for s in self.steps if s.status == "Running"), None)
-        return running or next((s for s in self.steps if s.status == "Pending"), None)
-
-
-# --- parsers --------------------------------------------------------------------------
-
-
-def parse_running_jobs(data: Any) -> list[JobRow]:
-    """`press.api.site.running_jobs` rows: FC puts the job name in `id` and the job type in
-    `name`."""
-    rows = data if isinstance(data, list) else []
-    return [
-        JobRow(
-            name=_str(r.get("id")), job_type=_str(r.get("name")), status=_status(r.get("status"))
-        )
-        for r in rows
-        if isinstance(r, dict) and r.get("id")
-    ]
-
-
-def parse_job(data: Any) -> MigrateState:
-    data = data if isinstance(data, dict) else {}
-    status = _status(data.get("status"))
-    steps = tuple(
-        JobStep(
-            step=_str(s.get("step_name")),
-            status=_status(s.get("status")),
-            duration=_str(s.get("duration")),
-            output=redact(_str(s.get("output")).strip())[-OUTPUT_CHARS:],
-        )
-        for s in data.get("steps") or []
-        if isinstance(s, dict)
-    )
-    stage = {
-        "Success": "success",
-        "Failure": "failure",
-        "Running": "running",
-        "Pending": "waiting",
-    }.get(status, "running")
-    return MigrateState(stage=stage, job=_str(data.get("name")), status=status, steps=steps)
+MigrateState = JobState  # one look at a migrate: the shared job state of jobs.py
 
 
 # --- service --------------------------------------------------------------------------
@@ -227,54 +143,44 @@ def watch_site_job(
     poll_seconds: float = POLL_SECONDS,
     clock: Callable[[], float] = time.monotonic,
 ) -> Iterator[MigrateState]:
-    """Find the new `job_type` job of `site` in its running jobs, then follow it until it
-    ends. Shared by the migrate and the install watch. `word` names the action in the
-    messages ("migrate", "install").
+    """Follow the new `job_type` job of `site` with the shared `SiteJobWatch`, and yield
+    the state of that job. Shared by the migrate and the install watch. `word` names the
+    action in the messages ("migrate", "install").
 
     Raises `unknown` when no such job shows up in FIND_LIMIT_SECONDS, and `failed` (with
     the failed step) when the job fails."""
-    polls = 0
-
-    def answered(state: MigrateState) -> MigrateState:
-        nonlocal polls
-        polls += 1
-        return replace(state, checked_at=clock(), polls=polls)
-
-    started = clock()
-    job = ""
-    while not job:
-        found = [j for j in service.running_jobs(site) if j.job_type == job_type]
-        if found:
-            job = found[0].name
-            break
-        if clock() - started >= FIND_LIMIT_SECONDS:
-            status = service.site_status(site)
+    spec = JobSpec(expected=(job_type,), find_limit=FIND_LIMIT_SECONDS)
+    watch = SiteJobWatch(service, site, spec, clock)
+    while True:
+        state = watch.poll()
+        if state.stage == "unknown":
             raise unknown(
                 f"FC accepted the {word}, but fcm did not see {_article(word)} {word} job for "
                 f"site {site.name}. The result is not known.",
                 target=f"site {site.name}",
-                hint=f"Site status on FC: {status or 'unknown'}. Run: fcm site-show {site.name}",
+                hint=f"Site status on FC: {state.site_status or 'unknown'}. "
+                f"Run: fcm site-show {site.name}",
             )
-        yield answered(MigrateState(stage="finding"))
-        sleep(poll_seconds)
-
-    while True:
-        state = service.job(site, job)
-        if state.status in JOB_DONE:
+        job = state.expected or MigrateState(stage="finding")
+        look = replace(
+            job,
+            stage=state.stage if state.final else job.stage if state.expected else "finding",
+            site_status=state.site_status if state.final else "",
+            checked_at=state.checked_at,
+            polls=state.polls,
+        )
+        yield look
+        if state.final:
             break
-        yield answered(state)
         sleep(poll_seconds)
-
-    final = replace(state, site_status=service.site_status(site))
-    yield answered(final)
-    if final.stage == "failure":
-        step = final.failed_step
+    if look.stage == "failure":
+        step = look.failed_step
         raise failed(
             f"The {word} failed on FC at {step.label if step else f'the {word} job'}",
             step=step.label if step else None,
             target=f"site {site.name}",
             server_message=(step.output if step else "") or None,
-            hint=f"Site status on FC: {final.site_status or 'unknown'}. "
+            hint=f"Site status on FC: {look.site_status or 'unknown'}. "
             f"Run: fcm site-show {site.name}",
         )
 

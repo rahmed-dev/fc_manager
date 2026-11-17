@@ -3,54 +3,41 @@
 This layer has no CLI dependency, so the TUI can reuse it. It never prompts. Every FC
 request goes to the team of the site only. The only write is `start()`.
 
-FC returns the name of the new `Site Update` record from the update request. The watch
-reads that record by name (`press.api.client.get`). The record shows the status and the
-steps of all FC jobs of the update (deactivate, backup, update, restore, recover,
-activate) in one list.
-
-A failed update is not final at once: FC then starts its recover job, which restores the
-site to the old bench. So the watch keeps going through Failure and Recovering. It ends at
-Success, Recovered, Fatal or Cancelled, or when the record stays at Failure with no recover
-job for FAILURE_LIMIT_SECONDS.
+The watch is the shared site job watch (jobs.py): it follows the "Update Site Migrate" or
+"Update Site Pull" job of the site, and the other jobs around it (backup, recover). A failed
+update is not final at once: FC then starts its recover job, which restores the site to the
+old bench. The recover job or the site status tells what FC did with the site (design D3).
+The `Site Update` record is not read (site-job-finder, design D6).
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from typing import Any
 
 from fc_manager.api.client import FCClient
 from fc_manager.errors import UpdateFailed, UpdateUnknown, UsageError
 from fc_manager.inventory import Site
-from fc_manager.migrate import IN_PROGRESS, JobStep, parse_running_jobs
-from fc_manager.redact import redact
+from fc_manager.jobs import (
+    IN_PROGRESS,
+    POLL_SECONDS,
+    RECOVERY_LIMIT_SECONDS,
+    UPDATE_JOB_TYPES,
+    JobSpec,
+    SiteJobReader,
+    SiteJobWatch,
+    WatchState,
+    parse_running_jobs,
+)
 
 UPDATE_METHOD = "press.api.site.update"
-RECORD_DOCTYPE = "Site Update"
 # fcm updates a site only in these states. FC itself does not check the status; an update
 # deactivates and moves the site, so a Broken site must be fixed first (design D3).
 UPDATE_STATUSES = ("Active", "Inactive")
-POLL_SECONDS = 2.0
-# A record at Failure with no recover job for this long ends the watch (design D1).
-FAILURE_LIMIT_SECONDS = 600.0
-OUTPUT_CHARS = 500
+FIND_LIMIT_SECONDS = 120.0  # no update job in this time: the result is not known
 SHORT_HASH = 7
-
-# Record status -> watch stage.
-STAGES = {
-    "Pending": "waiting",
-    "Scheduled": "waiting",
-    "Running": "running",
-    "Failure": "failure",
-    "Recovering": "recovering",
-    "Success": "success",
-    "Recovered": "recovered",
-    "Fatal": "fatal",
-    "Cancelled": "cancelled",
-}
-FINAL_STAGES = ("success", "recovered", "fatal", "cancelled")
 
 
 class NothingToUpdate(Exception):  # noqa: N818 - a signal, not an error
@@ -119,34 +106,7 @@ class UpdatePlan:
         }
 
 
-@dataclass(frozen=True)
-class UpdateState:
-    """One look at an update record. `stage` is one of: waiting, running, failure,
-    recovering, success, recovered, fatal, cancelled."""
-
-    stage: str
-    record: str = ""
-    status: str = ""
-    steps: tuple[JobStep, ...] = ()
-    source_bench: str = ""
-    destination_bench: str = ""
-    recover_job: str = ""
-    site_status: str = ""  # read once after the update ends
-    checked_at: float = field(default=0.0, compare=False)
-    polls: int = field(default=0, compare=False)
-
-    @property
-    def final(self) -> bool:
-        return self.stage in FINAL_STAGES
-
-    @property
-    def failed_step(self) -> JobStep | None:
-        return next((s for s in self.steps if s.status == "Failure"), None)
-
-    @property
-    def current_step(self) -> JobStep | None:
-        running = next((s for s in self.steps if s.status == "Running"), None)
-        return running or next((s for s in self.steps if s.status == "Pending"), None)
+UpdateState = WatchState  # one look at the jobs of the site during an update
 
 
 # --- parsers --------------------------------------------------------------------------
@@ -177,35 +137,6 @@ def parse_update_info(data: Any) -> UpdateInfo:
     return UpdateInfo(update_available=_flag(data.get("update_available")), apps=apps)
 
 
-def _step_status(value: Any) -> str:
-    text = _str(value)
-    return "Pending" if text == "Undelivered" else text
-
-
-def parse_update_record(data: Any) -> UpdateState:
-    data = data if isinstance(data, dict) else {}
-    status = _str(data.get("status"))
-    steps = tuple(
-        JobStep(
-            step=_str(s.get("title")) or _str(s.get("stage")) or _str(s.get("name")),
-            status=_step_status(s.get("status")),
-            duration=_str(s.get("duration")),
-            output=redact(_str(s.get("output")).strip())[-OUTPUT_CHARS:],
-        )
-        for s in data.get("steps") or []
-        if isinstance(s, dict)
-    )
-    return UpdateState(
-        stage=STAGES.get(status, "running"),
-        record=_str(data.get("name")),
-        status=status,
-        steps=steps,
-        source_bench=_str(data.get("source_bench")),
-        destination_bench=_str(data.get("destination_bench")),
-        recover_job=_str(data.get("recover_job")),
-    )
-
-
 # --- service --------------------------------------------------------------------------
 
 
@@ -223,11 +154,6 @@ class UpdateService:
     def info(self, site: Site) -> UpdateInfo:
         return parse_update_info(
             self._call(site, "press.api.site.check_for_updates", name=site.name)
-        )
-
-    def record(self, site: Site, name: str) -> UpdateState:
-        return parse_update_record(
-            self._call(site, "press.api.client.get", doctype=RECORD_DOCTYPE, name=name)
         )
 
     def check(self, site: Site, *, skip_failing_patches: bool = False) -> UpdatePlan:
@@ -262,89 +188,69 @@ class UpdateService:
         )
 
     def start(self, plan: UpdatePlan) -> str:
-        """The only write: send the update. FC returns the name of the update record."""
+        """The only write: send the update. FC returns the name of the update record; the
+        answer can hold no name, then this returns "" and the watch still runs (D6)."""
         site = plan.site
         name = self.client.write(UPDATE_METHOD, team=site.team.name, **plan.payload())
-        if not isinstance(name, str) or not name.strip():
-            raise UpdateUnknown(
-                f"FC accepted the update of site {site.name}, but its answer holds no update "
-                "record name. The update state on FC is not known.",
-                target=f"site {site.name}",
-                hint=f"Run: fcm site-show {site.name}",
-            )
-        return name.strip()
+        return name.strip() if isinstance(name, str) else ""
 
     def watch(
         self,
         plan: UpdatePlan,
-        record: str,
         sleep: Callable[[float], None],
         poll_seconds: float = POLL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> Iterator[UpdateState]:
-        """Follow the update record until the update ends. Yield one state after every poll
-        that FC answered, also when nothing changed.
+        """Follow the update jobs of the site until the update ends. Yield one state after
+        every poll that FC answered, also when nothing changed.
 
-        Raises UpdateFailed when the update ends in Recovered, Fatal or Cancelled, or stays
-        at Failure with no recover job for FAILURE_LIMIT_SECONDS."""
+        Raises UpdateUnknown when no update job shows up in the find limit, and
+        UpdateFailed when the update job fails (with what FC did with the site)."""
         site = plan.site
-        polls = 0
-        failure_since: float | None = None
+        spec = JobSpec(expected=UPDATE_JOB_TYPES, find_limit=FIND_LIMIT_SECONDS, recover=True)
+        watch = SiteJobWatch(SiteJobReader(self.client), site, spec, clock)
+        final = None
+        for state in watch.run(sleep, poll_seconds):
+            yield state
+            final = state
+        assert final is not None
+        raise_update_result(site, final)
 
-        def answered(state: UpdateState) -> UpdateState:
-            nonlocal polls
-            polls += 1
-            return replace(state, checked_at=clock(), polls=polls)
 
-        while True:
-            state = self.record(site, record)
-            if state.final:
-                break
-            if state.stage == "failure" and not state.recover_job:
-                now = clock()
-                if failure_since is None:
-                    failure_since = now
-                if now - failure_since >= FAILURE_LIMIT_SECONDS:
-                    break
-            else:
-                failure_since = None
-            yield answered(state)
-            sleep(poll_seconds)
-
-        final = replace(state, site_status=self.site_status(site))
-        yield answered(final)
-        if final.stage == "success":
-            return
-        step = final.failed_step
-        label = step.label if step else None
-        status_hint = f"Site status on FC: {final.site_status or 'unknown'}. "
-        show = f"Run: fcm site-show {site.name}"
-        if final.stage == "recovered":
-            message = (
-                f"The update failed on FC at {label or 'an update step'}. "
-                "FC restored the site to the old bench."
-            )
-            hint = status_hint + show
-        elif final.stage == "fatal":
-            message = (
-                f"The update failed on FC at {label or 'an update step'}. "
-                "FC could not restore the site."
-            )
-            hint = status_hint + "Contact FC support. " + show
-        elif final.stage == "cancelled":
-            message = "The update was cancelled on FC."
-            hint = status_hint + show
-        else:  # failure with no recover job past the limit
-            message = (
-                f"The update failed on FC at {label or 'an update step'}, and FC started no "
-                f"recovery in {int(FAILURE_LIMIT_SECONDS // 60)} minutes."
-            )
-            hint = status_hint + show
-        raise UpdateFailed(
-            message,
-            step=label,
-            outcome="failure" if final.stage == "failure" else final.stage,
+def raise_update_result(site: Site, final: UpdateState) -> None:
+    """Raise the error for a final update state that is not success. Shared by
+    `site-update` and the site results of `bench-deploy`."""
+    show = f"Run: fcm site-show {site.name}"
+    status_hint = f"Site status on FC: {final.site_status or 'unknown'}. "
+    if final.stage == "success":
+        return
+    if final.stage == "unknown":
+        raise UpdateUnknown(
+            f"FC accepted the update, but fcm did not see an update job for site {site.name}. "
+            "The result is not known.",
             target=f"site {site.name}",
-            server_message=(step.output if step else "") or None,
-            hint=hint,
+            hint=status_hint + show,
         )
+    job = final.expected.job_type if final.expected else "the update job"
+    step = final.failed_step
+    where = f"{job}, step {step.label}" if step else job
+    if final.stage == "recovered":
+        message = f"The update failed on FC at {where}. FC restored the site to the old bench."
+        hint = status_hint + show
+    elif final.stage == "fatal":
+        message = f"The update failed on FC at {where}. FC could not restore the site."
+        hint = status_hint + "Contact FC support. " + show
+    else:  # failure with no recovery seen in the limit
+        message = (
+            f"The update failed on FC at {where}, and FC started no recovery in "
+            f"{int(RECOVERY_LIMIT_SECONDS // 60)} minutes."
+        )
+        hint = status_hint + show
+    raise UpdateFailed(
+        message,
+        step=step.label if step else None,
+        outcome="failure" if final.stage == "failure" else final.stage,
+        target=f"site {site.name}",
+        server_message=(step.output if step else "") or None,
+        hint=hint,
+    )

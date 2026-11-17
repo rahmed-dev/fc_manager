@@ -1,0 +1,117 @@
+{
+ "message": {
+  "name": "job-21",
+  "creation": "2026-11-17 17:05:18.524197",
+  "job_type": "Update Site Migrate",
+  "status": "Failure",
+  "start": "2026-11-17 11:35:19.769487",
+  "end": "2026-11-17 11:36:00.700042",
+  "duration": "0:00:40.930555",
+  "steps": [
+   {
+    "step_name": "Enable Maintenance Mode",
+    "status": "Success",
+    "start": "2026-11-17 11:35:19.770620",
+    "end": "2026-11-17 11:35:20.327520",
+    "duration": "0:00:0.5569",
+    "output": ""
+   },
+   {
+    "step_name": "Wait for Enqueued Jobs",
+    "status": "Success",
+    "start": "2026-11-17 11:35:20.328452",
+    "end": "2026-11-17 11:35:23.873705",
+    "duration": "0:00:3.545253",
+    "output": ""
+   },
+   {
+    "step_name": "Clear Backup Directory",
+    "status": "Success",
+    "start": "2026-11-17 11:35:23.874390",
+    "end": "2026-11-17 11:35:23.874839",
+    "duration": "0:00:0.000449",
+    "output": ""
+   },
+   {
+    "step_name": "Backup Site Tables",
+    "status": "Failure",
+    "start": "2026-11-17 11:35:23.875251",
+    "end": "2026-11-17 11:36:00.699359",
+    "duration": "0:00:36.824108",
+    "output": "mariadb-dump: Got error: 1040: \"Too many connections\" when trying to connect"
+   },
+   {
+    "step_name": "Move Site",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Bench Setup NGINX",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Bench Setup NGINX Target",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Reload NGINX",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Run App Specific Scripts",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Migrate Site",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Log Touched Tables",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Disable Maintenance Mode",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   },
+   {
+    "step_name": "Build Search Index",
+    "status": "Skipped",
+    "start": null,
+    "end": null,
+    "duration": "0:00:00",
+    "output": null
+   }
+  ]
+ }
+}

@@ -78,6 +78,7 @@ def test_action_menu_names_the_direct_commands(dfc, cli, tty, menu):
         "Update a site (site-update)",
         "Install an app (site-install-app)",
         "Pick another bench",
+        "Pick another team",
         "Quit",
     ]
 
@@ -151,6 +152,38 @@ def test_other_bench_entry_goes_to_bench_step(dfc, cli, tty, menu):
     assert result.code == 0
     assert names(prompts) == ["Team", "Bench", "Action", "Bench", "Action"]
     assert prompts[4][2] == "work > ACME Corp > Prod (bench-1240)"
+
+
+def test_other_team_entry_goes_to_team_step(dfc, cli, tty, menu, monkeypatch):
+    script, prompts = menu
+    script += ["team-acme", "bench-1234", "team", "team-beta", "bench-0981", "quit"]
+    calls = []  # FC requests sent before each prompt
+    scripted = picker.choose
+
+    def choose(prompt, options, **kw):
+        calls.append(len(dfc.teams_seen))
+        return scripted(prompt, options, **kw)
+
+    monkeypatch.setattr(picker, "choose", choose)
+    result = cli()
+    assert result.code == 0, result.err
+    assert names(prompts) == ["Team", "Bench", "Action", "Team", "Bench", "Action"]
+    assert prompts[3][1] == prompts[0][1]  # the same team list
+    assert calls[3] == calls[2]  # no FC request between the action pick and the team step
+    assert prompts[4][1] == ["Prod (bench-0981)"]  # benches of team-beta only
+    assert prompts[5][2] == "work > Beta Ltd > Prod (bench-0981)"
+    assert dfc.posts == []
+
+
+def test_one_team_has_no_team_entry(dfc, cli, tty, menu):
+    dfc.teams = [t for t in dfc.teams if t["name"] == "team-acme"]
+    script, prompts = menu
+    script += ["bench-1234", "quit"]
+    result = cli()
+    assert result.code == 0, result.err
+    assert names(prompts) == ["Bench", "Action"]
+    assert prompts[1][1][-2:] == ["Pick another bench", "Quit"]
+    assert "Pick another team" not in prompts[1][1]
 
 
 # --- site-migrate group 6: registry and site step ------------------------------------
@@ -337,7 +370,7 @@ def test_ctrl_c_in_update_watch_returns_to_actions(upd, cli, tty, menu, monkeypa
     _, answers = tty
     script += ["team-acme", "bench-1234", "update", "quit"]
     answers["text"] = [SITE]
-    upd.update_records = [{"name": "su-new", "status": "Running", "steps": []}]
+    upd.job_docs = {"job-new": [{"name": "job-new", "status": "Running", "steps": []}]}
     result = cli()
     assert result.code == 0, result.err
     assert "The update continues on FC" in result.out

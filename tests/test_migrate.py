@@ -134,12 +134,22 @@ def run_watch(router, running_seq, job_seq, final_status="Active"):
     """running_seq: running_jobs rows per find poll. job_seq: job docs per follow poll."""
     running_iter = iter(running_seq)
     job_iter = iter(job_seq)
-    router.get(method_url("press.api.site.running_jobs")).mock(
-        side_effect=lambda r: respx.MockResponse(json={"message": next(running_iter)})
-    )
-    router.get(method_url("press.api.site.job")).mock(
-        side_effect=lambda r: respx.MockResponse(json={"message": next(job_iter)})
-    )
+    running_last: list = []
+
+    def running(_r):
+        # the shared watch reads the running jobs at every poll: the last answer repeats
+        running_last[:] = [next(running_iter, running_last[0] if running_last else [])]
+        return respx.MockResponse(json={"message": running_last[0]})
+
+    def job(r):
+        # the shared watch also follows the other jobs; those end in Success here
+        if r.url.params.get("job") != "job-4":
+            done = {"name": r.url.params.get("job"), "status": "Success", "steps": []}
+            return respx.MockResponse(json={"message": done})
+        return respx.MockResponse(json={"message": next(job_iter)})
+
+    router.get(method_url("press.api.site.running_jobs")).mock(side_effect=running)
+    router.get(method_url("press.api.site.job")).mock(side_effect=job)
     site_get = router.get(method_url("press.api.site.get")).respond(
         json={"message": {"status": final_status}}
     )

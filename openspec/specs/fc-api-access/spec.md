@@ -131,15 +131,15 @@ The read allowlist SHALL include `press.api.site.running_jobs` and `press.api.si
 - **THEN** the client raises an error and sends no request
 
 ### Requirement: Site update reads
-The read allowlist SHALL include `press.api.site.check_for_updates`, so that the update command can read the update info of one site. The document read method SHALL allow the doctype `Site Update`, so that the update command can read one update record by its name.
+The read allowlist SHALL include `press.api.site.check_for_updates`, so that the update command can read the update info of one site. The document read method SHALL NOT allow the doctype `Site Update`, because the update watch reads the site jobs and not the update record.
 
 #### Scenario: Update info of one site
 - **WHEN** the update command reads the update info of site `erp.acme.example.com`
 - **THEN** the request is a GET to `press.api.site.check_for_updates` with the name `erp.acme.example.com`
 
 #### Scenario: Update record read
-- **WHEN** the update command reads the update record `su-0001`
-- **THEN** the request is a GET to `press.api.client.get` with the doctype `Site Update` and the name `su-0001`
+- **WHEN** code asks the client for `press.api.client.get` with the doctype `Site Update`
+- **THEN** the client raises an error and sends no request
 
 ### Requirement: Document method write
 The system SHALL send `press.api.client.run_doc_method` only with the doctype `Release Group` and the method `add_app`. Any other doctype or method SHALL raise an error in the client and send no request.

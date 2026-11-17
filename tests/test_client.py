@@ -430,13 +430,12 @@ def test_check_for_updates_sends_get_with_plain_name():
 
 
 @respx.mock
-def test_client_get_allows_site_update_record():
+def test_client_get_refuses_site_update_record():
+    """site-job-finder D7: the update watch reads the site jobs, not the record."""
     route = respx.get(method_url("press.api.client.get")).respond(json={"message": {}})
-    make_client().call("press.api.client.get", team="t", doctype="Site Update", name="su-0001")
-    request = route.calls.last.request
-    assert request.method == "GET"
-    assert request.url.params["doctype"] == "Site Update"
-    assert request.url.params["name"] == "su-0001"
+    with pytest.raises(MethodNotAllowed):
+        make_client().call("press.api.client.get", team="t", doctype="Site Update", name="su-1")
+    assert route.call_count == 0
 
 
 # --- site-update 2.1: the update write --------------------------------------------------

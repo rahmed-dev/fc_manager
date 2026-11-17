@@ -149,6 +149,8 @@ On a terminal, the deploy watch SHALL show proof that FC still answers: the time
 ### Requirement: Deploy result
 On success, the system SHALL print the bench, the deployed apps, and the updated sites, and exit with code 0. When FC rejects the deploy request, the system SHALL show the FC message and exit with the code of the error kind, and SHALL NOT retry. When the deploy fails on FC after FC accepted it, the system SHALL show the failed step and the FC message, and exit with code 8.
 
+
+
 #### Scenario: Build fails
 - **WHEN** the FC build fails at step `Install apps`
 - **THEN** the system names the step, shows the FC message, and exits with code 8
@@ -157,16 +159,39 @@ On success, the system SHALL print the bench, the deployed apps, and the updated
 - **WHEN** FC answers the deploy request with a validation error, for example from its "will fail" check
 - **THEN** the system shows the FC message, sends no second request, and exits with code 1
 
+### Requirement: Site update results
+When the bench deploy succeeds, the system SHALL print one result for each selected site. When the update of one or more selected sites fails, the system SHALL exit with code 8. When no site update fails and the result of one or more sites is not known, the system SHALL exit with code 6.
+
+#### Scenario: One of two site updates fails
+- **WHEN** the bench deploy succeeds, the update of site `a.acme.com` succeeds, and the update of site `b.acme.com` fails
+- **THEN** the system reports `a.acme.com` as updated, reports `b.acme.com` as failed with its job, its step and the FC output, and exits with code 8
+
+#### Scenario: Site result not known
+- **WHEN** the bench deploy succeeds, the update of site `a.acme.com` succeeds, and no site update job of site `b.acme.com` shows up within 30 minutes
+- **THEN** the system reports `a.acme.com` as updated, says that the result of `b.acme.com` is not known, and exits with code 6
+
+#### Scenario: Deploy with no selected site
+- **WHEN** the bench deploy succeeds and the user selected no site
+- **THEN** the system prints the bench and the deployed apps, follows no site job, and exits with code 0
+
 ### Requirement: Site update wait
-After the new bench is ready, the system SHALL wait until each selected site is on a new bench, because FC moves each site in a separate job. When FC does not confirm a site move within 30 minutes, the system SHALL say that the result is not known, name the site, and exit with code 6.
+After the new bench is ready, the system SHALL follow the site update job ("Update Site Migrate" or "Update Site Pull") of each selected site with the site job watch, for all selected sites in the same watch. It SHALL show each site with its state. The find limit for a site update job SHALL be 30 minutes. A failed site update SHALL get the same outcome check as `fcm site-update`.
 
 #### Scenario: Site moves after the bench is ready
-- **WHEN** the new bench is ready, and selected site `erp.acme.com` is still on the old bench for some polls
-- **THEN** the system shows `erp.acme.com (waiting)`, keeps polling, and reports the site as updated when FC moves it
+- **WHEN** the new bench is ready, and the "Update Site Migrate" job of selected site `erp.acme.com` ends in Success
+- **THEN** the system reports `erp.acme.com` as updated
+
+#### Scenario: Site update job is not there yet
+- **WHEN** the new bench is ready, and no site update job of selected site `erp.acme.com` shows up for some polls
+- **THEN** the system shows `erp.acme.com (waiting)` and keeps polling
+
+#### Scenario: Site update fails
+- **WHEN** the "Update Site Migrate" job of selected site `erp.acme.com` ends in Failure at the step "Backup Site Tables" with the output `mariadb-dump: Got error: 1040: "Too many connections" when trying to connect`
+- **THEN** the system names the site, the job "Update Site Migrate" and the step "Backup Site Tables", shows that output, and says what FC did with the site
 
 #### Scenario: Site move not confirmed in time
-- **WHEN** selected site `erp.acme.com` is still on the old bench 30 minutes after the new bench is ready
-- **THEN** the system says that FC did not confirm the update of `erp.acme.com`, says that its result is not known, and exits with code 6
+- **WHEN** no site update job of selected site `erp.acme.com` shows up within 30 minutes after the new bench is ready
+- **THEN** the system says that FC did not start the update of `erp.acme.com`, says that its result is not known, names `fcm site-show erp.acme.com`, and exits with code 6
 
 ### Requirement: Bench detail
 The system SHALL provide `fcm bench-show [BENCH]`. With no BENCH on a terminal, it SHALL use the same team-then-bench walk as `fcm bench-deploy`. It SHALL show the team, the bench title and name, the Frappe version, the status, each app with its current version and any available update, the sites on the bench, and the state of a running deploy with its build steps. `fcm bench-show` SHALL NOT change any state on FC.

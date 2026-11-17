@@ -34,13 +34,15 @@ from fc_manager.cli.inventory import team_option as _team_option
 from fc_manager.cli.root import app
 from fc_manager.cli.watch import WatchView, changes, steps_table
 from fc_manager.deploy import (
+    OUTCOME_TEXT,
     AppUpdate,
     DeployInfo,
     DeployPlan,
     DeployService,
     DeployState,
+    SiteResult,
 )
-from fc_manager.errors import DeployFailed, FcmError, NotFound, UsageError
+from fc_manager.errors import DeployFailed, FcmError, NotFound, SiteUpdateUnknown, UsageError
 from fc_manager.inventory import Bench
 from fc_manager.output import Column
 
@@ -150,12 +152,50 @@ def _state_json(state: DeployState) -> dict:
         "status": state.status or None,
         "steps": [asdict(step) for step in state.steps],
         "message": state.message or None,
-        "sites": [{"site": name, "moved": moved} for name, moved in state.sites],
+        "sites": [_site_json(r) for r in state.sites],
     }
 
 
+def _site_json(r: SiteResult) -> dict:
+    return {
+        "site": r.site,
+        "result": r.result or None,
+        "stage": r.stage,
+        "job": r.job or None,
+        "step": r.step or None,
+        "output": r.output or None,
+        "outcome": r.outcome or None,
+        "site_status": r.site_status or None,
+    }
+
+
+# Site job watch stage -> the short word in the site list of the watch.
+SITE_STAGE_WORD = {
+    "finding": "waiting",
+    "waiting": "queued",
+    "running": "updating",
+    "recovering": "failed; FC restores the site",
+    "success": "updated",
+    "failure": "failed",
+    "recovered": "failed",
+    "fatal": "failed",
+    "unknown": "not known",
+}
+
+
 def _sites_line(state: DeployState) -> str:
-    return ", ".join(f"{name} ({'moved' if moved else 'waiting'})" for name, moved in state.sites)
+    return ", ".join(f"{r.site} ({SITE_STAGE_WORD.get(r.stage, r.stage)})" for r in state.sites)
+
+
+def _site_text(r: SiteResult) -> str:
+    """One line of the deploy result for one site."""
+    if r.result == "updated":
+        return f"{r.site}: updated"
+    if r.result == "unknown":
+        return f"{r.site}: result not known (FC started no update job)"
+    where = f"{r.job or 'the update job'}, step {r.step}" if r.step else (r.job or "the update")
+    outcome = OUTCOME_TEXT.get(r.outcome, "")
+    return f"{r.site}: failed at {where}" + (f"; {outcome}" if outcome else "")
 
 
 def _step_status(step) -> str:
@@ -371,7 +411,11 @@ def _WatchView(title: str, clock=time.monotonic) -> WatchView:  # noqa: N802 - k
     )  # fmt: skip
 
 
-def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
+def _watch(
+    s: Session, service: DeployService, plan: DeployPlan, seen: list[DeployState]
+) -> DeployState:
+    """`seen` gets the last state, so that the caller can show the site results also when
+    the watch raises for a failed site update."""
     bench = plan.bench
     final: DeployState | None = None
     states = service.watch(plan, sleep=time.sleep)
@@ -379,6 +423,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
         for state in changes(states):
             s.out.emit_json_line({"event": "progress", **_state_json(state)})
             final = state
+            seen[:] = [state]
     elif s.interactive:
         view = _WatchView(bench.title or bench.name)
         with Live(view, console=s.out.console, refresh_per_second=4, transient=False) as live:
@@ -386,6 +431,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
                 for state in states:
                     view.update(state)
                     final = state
+                    seen[:] = [state]
             finally:
                 view.done = True
                 live.refresh()
@@ -396,6 +442,7 @@ def _watch(s: Session, service: DeployService, plan: DeployPlan) -> DeployState:
                 now = f" - {_sites_line(state)}"
             s.out.message(f"{STAGE_TEXT[state.stage]}{now}")
             final = state
+            seen[:] = [state]
     assert final is not None
     return final
 
@@ -563,8 +610,9 @@ def deploy_bench(
         s.out.message(f"Follow it with: fcm bench-show {target.name}")
         return
 
+    seen: list[DeployState] = []
     try:
-        final = _watch(s, service, plan)
+        final = _watch(s, service, plan, seen)
     except KeyboardInterrupt:
         s.out.message("")
         s.out.message(
@@ -573,25 +621,28 @@ def deploy_bench(
         if in_menu:
             raise WatchStopped from None
         raise typer.Exit(130) from None
-    except DeployFailed as err:
+    except (DeployFailed, SiteUpdateUnknown) as err:
+        if seen and seen[-1].stage == "success":  # the bench is ready; a site update is not
+            _result(s, target, plan, seen[-1])
         raise _scoped(err, target) from err
     except FcmError as err:
         raise _scoped(err, target) from err
+    _result(s, target, plan, final)
 
-    if json_mode:
+
+def _result(s: Session, target: Bench, plan: DeployPlan, final: DeployState) -> None:
+    """The deploy result: the bench, the apps, and one line for each selected site."""
+    if s.out.json_mode:
         s.out.emit_json_line({"event": "result", **_state_json(final)})
-    else:
-        s.out.message("")
-        s.out.detail(
-            "Deploy finished",
-            [
-                ("Bench", f"{target.title} ({target.name})"),
-                ("Apps", ", ".join(f"{a.app} {a.next_version}" for a in plan.apps) or "none"),
-                (
-                    "Sites",
-                    "Bench only: no site is updated"
-                    if plan.bench_only
-                    else ", ".join(f"{n} (updated)" for n, _ in final.sites),
-                ),
-            ],
-        )
+        return
+    sites = [_site_text(r) for r in final.sites] or ["Bench only: no site is updated"]
+    s.out.message("")
+    s.out.detail(
+        "Deploy finished",
+        [
+            ("Bench", f"{target.title} ({target.name})"),
+            ("Apps", ", ".join(f"{a.app} {a.next_version}" for a in plan.apps) or "none"),
+            ("Sites", sites[0]),
+            *[("", line) for line in sites[1:]],
+        ],
+    )

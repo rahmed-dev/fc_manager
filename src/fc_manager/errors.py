@@ -149,8 +149,7 @@ class MigrateUnknown(FcmError):
 
 class UpdateFailed(FcmError):
     """FC accepted a site update, and the update then failed on FC (exit 8). `outcome` is
-    what FC did with the site: "failure" (no recovery), "recovered", "fatal" or
-    "cancelled"."""
+    what FC did with the site: "failure" (no recovery), "recovered" or "fatal"."""
 
     kind = ErrorKind.JOB_FAILED
 
@@ -163,8 +162,8 @@ class UpdateFailed(FcmError):
 
 
 class UpdateUnknown(FcmError):
-    """FC accepted a site update, but its answer holds no update record name. The result is
-    not known (exit 6)."""
+    """FC accepted a site update, but fcm did not see an update job for the site. The result
+    is not known (exit 6)."""
 
     kind = ErrorKind.SERVER
 

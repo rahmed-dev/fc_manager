@@ -15,12 +15,12 @@ You need [uv](https://docs.astral.sh/uv/). uv gets Python 3.11 or later for you 
 system has none.
 
 ```bash
-uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.2.1
+uv tool install git+https://github.com/rahmed-dev/fc_manager@v1.3.0
 ```
 
 uv installs `fcm` in its own environment and puts the `fcm` command on your PATH
 (`~/.local/bin`). If you use pipx instead, run
-`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.2.1`.
+`pipx install git+https://github.com/rahmed-dev/fc_manager@v1.3.0`.
 
 ### First run
 
@@ -45,7 +45,7 @@ See [Keyring on a headless Linux host](#keyring-on-a-headless-linux-host).
 ### Upgrade and uninstall
 
 ```bash
-uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.2.1   # a newer tag
+uv tool install --force git+https://github.com/rahmed-dev/fc_manager@v1.3.0   # a newer tag
 fcm --version
 uv tool uninstall fc-manager
 ```
@@ -77,6 +77,7 @@ work > ACME Corp > ACME Prod (bench-1234)
    Update a site (site-update)
    Install an app (site-install-app)
    Pick another bench
+   Pick another team
    Quit
 ```
 
@@ -88,8 +89,9 @@ after a site pick. It always shows what the next action works on.
 1. **Team**: pick a team. `fcm` skips this step when your login reaches one team only.
 2. **Bench**: pick a bench of that team. `fcm` asks FC for that team's benches only.
 3. **Action**: show the bench, deploy app updates, add an app, migrate a site, update a
-   site, install an app on a site, pick another bench, or quit. Each entry names its direct
-   command.
+   site, install an app on a site, pick another bench, pick another team, or quit. Each
+   action names its direct command. "Pick another team" shows only when your login
+   reaches more than one team. It opens the team step again.
 4. **Site** (site actions only): pick a site of that bench, shown with its status.
    "Update a site" lists only the sites that have an update. When only one site is left,
    `fcm` picks it with no list and prints its name.
@@ -228,8 +230,15 @@ you through these steps:
 4. **Preview.** The profile, the team and its owner, the bench, each app from version to
    version, removed apps, and the sites or "Bench only".
 5. **Confirm.** Type the bench title exactly. Any other input cancels, and nothing is sent.
-6. **Progress.** `fcm` follows the build step by step until it ends. Ctrl+C stops the
-   watch only: the deploy continues on FC. Run `fcm bench-show <bench>` to look again.
+6. **Progress.** `fcm` follows the build step by step until it ends. Then it follows the
+   FC update job of each selected site ("Update Site Migrate" or "Update Site Pull"), as
+   the Jobs tab of the site in the FC dashboard shows it. Ctrl+C stops the watch only: the
+   deploy continues on FC. Run `fcm bench-show <bench>` to look again.
+7. **Result.** The bench, the apps, and one line for each selected site: updated, failed
+   (with the job, the failed step and what FC did with the site), or not known. A failed
+   site update exits with code 8, and the error shows the FC output of the failed step.
+   When FC starts no update job for a site in 30 minutes, the result of that site is not
+   known (exit 6).
 
 Esc goes back one step. When FC reports no update, or a deploy is already running on the
 bench, `fcm` says so and sends nothing.
@@ -295,14 +304,18 @@ of the site first. On a terminal it walks you through these steps:
    each app with an update and its current and next version (the release tag, else the
    short commit hash), a note for each app whose branch changes, and the patch mode.
 4. **Confirm.** Type the site name exactly. Any other input cancels, and nothing is sent.
-5. **Progress.** `fcm` follows the new FC update record and its steps until it ends. When
-   the update fails, FC usually restores the site to the old bench; the watch shows that
-   too. Ctrl+C stops the watch only: the update continues on FC.
-6. **Result.** "the site is updated" with the new bench (exit 0). A failed update exits
-   with code 8 and says what FC did: it restored the site to the old bench (Recovered), it
-   could not restore the site (Fatal: contact FC support), or the update was cancelled.
-   When the update stays failed for 10 minutes and FC starts no restore, `fcm` also exits
-   with code 8. The result shows the site status on FC after the update.
+5. **Progress.** `fcm` follows the FC jobs of the site until the update job ("Update Site
+   Migrate" or "Update Site Pull") ends, and also shows the other jobs, such as a backup.
+   When the update fails, FC usually restores the site to the old bench with a "Recover
+   Failed Site Update" job; the watch shows that too. Ctrl+C stops the watch only: the
+   update continues on FC.
+6. **Result.** "the site is updated" (exit 0). A failed update exits with code 8. It names
+   the failed job and step, shows the FC output of the step, and says what FC did: it
+   restored the site to the old bench, or it could not restore the site (contact FC
+   support). `fcm` knows this from the recover job or from the site status (Active or
+   Inactive: restored; Broken: not restored). When neither answers in 10 minutes, `fcm`
+   also exits with code 8. When no update job shows up in 2 minutes, the result is not
+   known (exit 6). The result shows the site status on FC after the update.
 
 ```bash
 fcm site-update --dry-run                              # pick team, bench, site; preview only
@@ -313,8 +326,11 @@ fcm site-update erp.acme.com --confirm erp.acme.com --no-wait --json
 Without a terminal, you must give the site and `--confirm` with the site name. There is no
 `--yes`, and there is no option to skip the FC backup. `--skip-failing-patches` lets FC
 continue past a failing patch; the preview warns about it, and the menu never turns it on.
-When FC does not confirm the request, or confirms it without the name of the update
-record, `fcm` says that the update state is not known (exit 6).
+When FC does not confirm the request, `fcm` says that the update state is not known
+(exit 6).
+
+`fcm` sees a job only while it is Pending or Running, because FC has no job list that works
+for an API key. A job that starts and ends between two polls (every 2 seconds) is not seen.
 
 ### Add an app to a bench
 
@@ -396,9 +412,9 @@ that the result is not known (exit 6).
 | 3 | Authentication error (FC rejected the key) |
 | 4 | Permission error |
 | 5 | Not found |
-| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, a site update not confirmed in 30 minutes, a migrate or install job not found in 2 minutes, or an update with no record name) |
+| 6 | Network, server or rate-limit error; also a result FC did not confirm (a write with no answer, no site update job in 30 minutes after a bench deploy, or no migrate, install or update job in 2 minutes) |
 | 7 | Partial failure across teams |
-| 8 | FC accepted a deploy, a migrate, a site update or an app install, but it failed on FC (a failed build step, migrate step, update or install step, also when FC restored the site to the old bench) |
+| 8 | FC accepted a deploy, a migrate, a site update or an app install, but it failed on FC (a failed build step, migrate step, update or install step, also a failed site update after a bench deploy, and also when FC restored the site to the old bench) |
 
 ## Credentials and security
 

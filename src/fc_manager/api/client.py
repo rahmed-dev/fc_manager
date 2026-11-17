@@ -71,7 +71,7 @@ WRITE_FOLLOW_UP: dict[str, tuple[str, str]] = {
 }
 
 # press.api.client.get reads any doctype the user may see. fcm allows it for these only.
-READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build", "Site Update"})
+READ_DOCTYPES: frozenset[str] = frozenset({"Deploy Candidate Build"})
 
 # press.api.client.run_doc_method runs any dashboard method of a document. fcm allows only
 # these (doctype, method) pairs: adding a GitHub app to a bench group.

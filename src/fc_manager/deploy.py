@@ -14,7 +14,14 @@ from typing import Any
 
 from fc_manager.api.client import FCClient
 from fc_manager.errors import DeployFailed, SiteUpdateUnknown, UsageError
-from fc_manager.inventory import Bench
+from fc_manager.inventory import Bench, Site
+from fc_manager.jobs import (
+    UPDATE_JOB_TYPES,
+    JobSpec,
+    SiteJobReader,
+    SiteJobWatch,
+    WatchState,
+)
 from fc_manager.redact import redact
 
 DEPLOY_METHOD = "press.api.bench.deploy_and_update"
@@ -161,17 +168,61 @@ class BuildStep:
 
 
 @dataclass(frozen=True)
+class SiteResult:
+    """The update of one selected site after the bench deploy. `stage` is a stage of the
+    site job watch (jobs.WatchState); `job`, `step` and `output` name the failure."""
+
+    site: str
+    stage: str
+    job: str = ""
+    step: str = ""
+    output: str = ""
+    outcome: str = ""  # failed update: restored, not restored, or no recovery
+    site_status: str = ""
+
+    @property
+    def result(self) -> str:
+        """updated, failed, unknown, or "" while the update runs."""
+        if self.stage == "success":
+            return "updated"
+        if self.stage in ("failure", "recovered", "fatal"):
+            return "failed"
+        return "unknown" if self.stage == "unknown" else ""
+
+
+def site_result(site: str, state: WatchState) -> SiteResult:
+    step = state.failed_step
+    return SiteResult(
+        site=site,
+        stage=state.stage,
+        job=state.expected.job_type if state.expected else "",
+        step=step.label if step else "",
+        output=step.output if step else "",
+        outcome=state.outcome,
+        site_status=state.site_status,
+    )
+
+
+OUTCOME_TEXT = {
+    "restored": "FC restored the site to the old bench",
+    "not restored": "FC could not restore the site; contact FC support",
+    "no recovery": "FC started no recovery",
+}
+
+
+@dataclass(frozen=True)
 class DeployState:
     """One look at a deploy. `stage` is one of: idle, starting, validating, building,
     finishing, updating_sites, success, failure. `starting` means FC shows no check and no
-    build yet. `sites` holds (site, moved) during updating_sites and after success."""
+    build yet. `sites` holds one SiteResult for each selected site during updating_sites
+    and after success."""
 
     stage: str
     build: str = ""
     status: str = ""
     steps: tuple[BuildStep, ...] = ()
     message: str = ""
-    sites: tuple[tuple[str, bool], ...] = field(default=())  # (site, moved) after success
+    sites: tuple[SiteResult, ...] = field(default=())
     # Liveness of the watch, not of the deploy: when FC last answered a poll, and how many
     # polls ran. Not part of equality, so two looks with the same FC data compare equal.
     checked_at: float = field(default=0.0, compare=False)
@@ -424,38 +475,72 @@ class DeployService:
                 break
             sleep(poll_seconds)
 
-        # Then FC moves each selected site in a separate job. No busy flag covers that job,
-        # so wait until each site is on a bench other than the one it had before the deploy.
-        old = {site.name: site.bench for site in plan.sites}
-        started = clock()
+        # Then FC updates each selected site in its own job ("Update Site Migrate" or
+        # "Update Site Pull"). Follow the jobs of all selected sites in one loop (D4).
+        spec = JobSpec(
+            expected=UPDATE_JOB_TYPES, find_limit=SITE_UPDATE_LIMIT_SECONDS, recover=True
+        )
+        reader = SiteJobReader(self.client)
+        watches = [
+            SiteJobWatch(reader, _plan_site(bench, site.name), spec, clock) for site in plan.sites
+        ]
         while True:
-            now = {site.name: site.bench for site in info.sites}
-            moved = tuple((name, now.get(name, before) != before) for name, before in old.items())
-            if all(flag for _, flag in moved):
+            for watch in watches:
+                if not watch.state.final:
+                    watch.poll()
+            results = tuple(site_result(w.site.name, w.state) for w in watches)
+            if all(w.state.final for w in watches):
                 break
-            if clock() - started >= SITE_UPDATE_LIMIT_SECONDS:
-                waiting = [name for name, flag in moved if not flag]
-                raise SiteUpdateUnknown(
-                    "The bench was deployed, but FC did not confirm the update of "
-                    + ", ".join(waiting)
-                    + f" in {SITE_UPDATE_LIMIT_SECONDS // 60} minutes. Its result is not known.",
-                    target=f"bench {bench.name}",
-                    hint=f"Check the site in the FC dashboard. Run: fcm bench-show {bench.name}",
-                )
             yield answered(
                 DeployState(
                     stage="updating_sites",
                     build=build,
                     status="Success",
                     steps=done_steps,
-                    sites=moved,
+                    sites=results,
                 )
             )
             sleep(poll_seconds)
-            info = self.info(bench)
 
         yield answered(
             DeployState(
-                stage="success", build=build, status="Success", steps=done_steps, sites=moved
+                stage="success", build=build, status="Success", steps=done_steps, sites=results
             )
+        )
+        raise_site_results(bench, results)
+
+
+def _plan_site(bench: Bench, name: str) -> Site:
+    """The site job watch needs the site name and its team only."""
+    return Site(bench.team, name, bench.name, bench.title, "", "", "", False)
+
+
+def raise_site_results(bench: Bench, results: Sequence[SiteResult]) -> None:
+    """D5: DeployFailed (exit 8) when one or more site updates failed, else
+    SiteUpdateUnknown (exit 6) when one or more results are not known."""
+    failed = [r for r in results if r.result == "failed"]
+    unknown = [r for r in results if r.result == "unknown"]
+    if failed:
+        lines = []
+        for r in failed:
+            where = f"{r.job or 'the update job'}, step {r.step}" if r.step else r.job
+            lines.append(f"{r.site}: {where}. {OUTCOME_TEXT.get(r.outcome, '')}".rstrip())
+        output = "\n".join(f"{r.site}: {r.output}" for r in failed if r.output)
+        raise DeployFailed(
+            "The bench was deployed, but the update of "
+            + ", ".join(r.site for r in failed)
+            + " failed on FC:\n  "
+            + "\n  ".join(lines),
+            step=failed[0].step or None,
+            target=f"bench {bench.name}",
+            server_message=output or None,
+            hint="Run: " + "; ".join(f"fcm site-show {r.site}" for r in failed),
+        )
+    if unknown:
+        names = ", ".join(r.site for r in unknown)
+        raise SiteUpdateUnknown(
+            f"The bench was deployed, but FC did not start the update of {names} in "
+            f"{SITE_UPDATE_LIMIT_SECONDS // 60} minutes. Its result is not known.",
+            target=f"bench {bench.name}",
+            hint="Run: " + "; ".join(f"fcm site-show {r.site}" for r in unknown),
         )

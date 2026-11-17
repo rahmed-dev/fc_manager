@@ -1,7 +1,7 @@
 """`fcm site-update`: move one FC site to the newest bench of its bench group.
 
 The walk is: site (or team, bench, a site with an update on a terminal), checks, preview,
-typed site name, update request, watch of the update record, result. The only write is
+typed site name, update request, watch of the site jobs (jobs.py), result. The only write is
 the update request. There is no option to skip the FC backup.
 """
 
@@ -36,14 +36,15 @@ from fc_manager.inventory import Site
 from fc_manager.update import NothingToUpdate, UpdatePlan, UpdateService, UpdateState
 
 STAGE_TEXT = {
+    "finding": "waiting for the update job on FC",
     "waiting": "the update is queued on FC",
     "running": "FC is updating the site",
-    "failure": "the update failed; waiting for FC to restore the site",
-    "recovering": "FC restores the site to the old bench",
+    "recovering": "the update failed; FC restores the site to the old bench",
     "success": "finished",
+    "failure": "failed; FC started no recovery",
     "recovered": "failed; FC restored the site to the old bench",
     "fatal": "failed; FC could not restore the site",
-    "cancelled": "cancelled on FC",
+    "unknown": "no update job seen; the result is not known",
 }
 SKIP_WARNING = "FC continues past a failing patch. The site can end up with a partial migrate."
 DOWNTIME = "Site is down during the update; FC takes a backup first"
@@ -92,14 +93,28 @@ def _plan_json(s: Session, plan: UpdatePlan) -> dict:
     }
 
 
+def jobs_json(state: UpdateState) -> list[dict]:
+    """Every followed job of the site, with its steps. Shared with `bench-deploy`."""
+    return [
+        {
+            "job": job.job,
+            "job_type": job.job_type or None,
+            "status": job.status or None,
+            "steps": [asdict(step) for step in job.steps],
+        }
+        for job in state.jobs
+    ]
+
+
 def _state_json(state: UpdateState) -> dict:
+    step = state.failed_step
     return {
         "stage": state.stage,
-        "record": state.record or None,
-        "status": state.status or None,
-        "steps": [asdict(step) for step in state.steps],
-        "source_bench": state.source_bench or None,
-        "destination_bench": state.destination_bench or None,
+        "jobs": jobs_json(state),
+        "job": state.expected.job_type if state.expected else None,
+        "step": step.label if step else None,
+        "output": (step.output if step else "") or None,
+        "outcome": state.outcome or None,
         "site_status": state.site_status or None,
     }
 
@@ -160,9 +175,9 @@ def watch_view(title: str, clock=time.monotonic) -> WatchView:
     return WatchView("Update", title, stage_text=_stage, table=_table, clock=clock)
 
 
-def _watch(s: Session, service: UpdateService, plan: UpdatePlan, record: str) -> UpdateState:
+def _watch(s: Session, service: UpdateService, plan: UpdatePlan) -> UpdateState:
     final: UpdateState | None = None
-    states = service.watch(plan, record, sleep=time.sleep)
+    states = service.watch(plan, sleep=time.sleep)
     if s.out.json_mode:
         for state in changes(states):
             s.out.emit_json_line({"event": "progress", **_state_json(state)})
@@ -228,15 +243,18 @@ def update_site(
     except FcmError as err:
         raise _scoped(err, site) from err
     if json_mode:
-        s.out.emit_json_line({"event": "accepted", "record": record, "plan": _plan_json(s, plan)})
+        s.out.emit_json_line(
+            {"event": "accepted", "record": record or None, "plan": _plan_json(s, plan)}
+        )
     else:
-        s.out.message(f"FC accepted the update of {site.name} ({record}).")
+        named = f" ({record})" if record else ""
+        s.out.message(f"FC accepted the update of {site.name}{named}.")
     if opts.no_wait:
         s.out.message(f"The update started. Follow it with: fcm site-show {site.name}")
         return
 
     try:
-        final = _watch(s, service, plan, record)
+        final = _watch(s, service, plan)
     except KeyboardInterrupt:
         s.out.message("")
         s.out.message(
@@ -256,8 +274,6 @@ def update_site(
             "Update finished: the site is updated",
             [
                 ("Site", site.name),
-                ("New bench", final.destination_bench or "unknown"),
-                ("Old bench", final.source_bench or "unknown"),
                 ("Site status", final.site_status or "unknown"),
             ],
         )

@@ -213,52 +213,98 @@ def test_full_deploy_json_bench_only(dfc, cli):
     assert {team for _, team, _ in after_bench_pick(dfc)} == {"team-acme"}
 
 
-def test_deploy_with_site_moved(dfc, cli):
-    finish_infos(dfc, site_bench="bench-3")
+def test_deploy_with_site_updated(dfc, cli):
+    finish_infos(dfc)
     result = cli(
         "bench-deploy", "bench-1234", "--app", "hrms", "--site", SITE,
         "--confirm", "bench-1234",
     )  # fmt: skip
     assert result.code == 0, result.err
-    assert f"{SITE} (updated)" in result.out
+    assert f"{SITE}: updated" in result.out
     sent = dfc.posts[0]["sites"][0]
     assert sent["name"] == SITE and sent["skip_backups"] is False
     assert sent["skip_failing_patches"] is False
 
 
-def test_deploy_waits_for_late_site_move(dfc, cli):
-    """FC moves the site in a separate job after the bench is ready (seen live 2026-11-09)."""
-    done = info(has_running_release_pipeline=False)
-    moved = info(has_running_release_pipeline=False)
-    moved["sites"][0]["bench"] = "bench-3"
-    dfc.deploy_infos["bench-1234"] = [
-        info(),
-        info(has_running_release_pipeline=True),
-        done,
-        done,
-        moved,
-    ]
+def test_deploy_waits_for_the_site_update_job(dfc, cli):
+    """FC starts the site update job after the bench is ready (seen live 2026-11-09)."""
+    finish_infos(dfc)
+    dfc.site_job_hidden_polls = 2
     result = cli(
         "bench-deploy", "bench-1234", "--app", "hrms", "--site", SITE,
         "--confirm", "bench-1234",
     )  # fmt: skip
     assert result.code == 0, result.err
     assert f"{SITE} (waiting)" in result.err + result.out
-    assert f"{SITE} (updated)" in result.out
+    assert f"{SITE}: updated" in result.out
 
 
-def test_deploy_site_not_confirmed_in_time_exits_6(dfc, cli, monkeypatch):
+TOO_MANY = 'mariadb-dump: Got error: 1040: "Too many connections" when trying to connect'
+FAILED_DOC = {
+    "name": f"job-up-{SITE}",
+    "job_type": "Update Site Migrate",
+    "status": "Failure",
+    "steps": [
+        {"step_name": "Backup Site Tables", "status": "Failure", "output": TOO_MANY},
+        {"step_name": "Move Site", "status": "Skipped", "output": ""},
+    ],
+}
+
+
+def test_deploy_site_update_fails_exits_8(dfc, cli):
+    finish_infos(dfc)
+    dfc.job_docs = {f"job-up-{SITE}": [FAILED_DOC]}  # the site stays Active: restored
+    result = cli(
+        "bench-deploy", "bench-1234", "--app", "hrms", "--site", SITE,
+        "--confirm", "bench-1234",
+    )  # fmt: skip
+    assert result.code == 8, result.err
+    line = f"{SITE}: failed at Update Site Migrate, step Backup Site Tables"
+    assert line in result.out
+    assert "FC restored the site to the old bench" in result.out
+    assert "Too many connections" in result.err
+    assert len(dfc.posts) == 1
+
+
+def test_deploy_site_update_fails_json(dfc, cli):
+    finish_infos(dfc)
+    dfc.job_docs = {f"job-up-{SITE}": [FAILED_DOC]}
+    result = cli(
+        "bench-deploy", "bench-1234", "--app", "hrms", "--site", SITE,
+        "--confirm", "bench-1234", "--json",
+    )  # fmt: skip
+    assert result.code == 8
+    events = [json.loads(line) for line in result.out.splitlines()]
+    final = next(e for e in events if e["event"] == "result")
+    assert final["sites"] == [
+        {
+            "site": SITE,
+            "result": "failed",
+            "stage": "recovered",
+            "job": "Update Site Migrate",
+            "step": "Backup Site Tables",
+            "output": TOO_MANY,
+            "outcome": "restored",
+            "site_status": "Active",
+        }
+    ]
+
+
+def test_deploy_site_update_not_started_exits_6(dfc, cli, monkeypatch):
     from fc_manager import deploy as deploy_module
 
     monkeypatch.setattr(deploy_module, "SITE_UPDATE_LIMIT_SECONDS", 0)
-    finish_infos(dfc, site_bench="bench-2")
+    finish_infos(dfc)
+    dfc.deploy_makes_site_jobs = False
     result = cli(
         "bench-deploy", "bench-1234", "--app", "hrms", "--site", SITE,
         "--confirm", "bench-1234",
     )  # fmt: skip
     assert result.code == 6
-    assert "did not confirm the update of " + SITE in result.err
+    assert "did not start the update of " + SITE in result.err
     assert "not known" in result.err
+    assert f"fcm site-show {SITE}" in result.err
+    assert f"{SITE}: result not known" in result.out
     assert len(dfc.posts) == 1
 
 

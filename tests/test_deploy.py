@@ -7,13 +7,14 @@ import httpx
 import pytest
 import respx
 
+from fc_manager import deploy as deploy_module
 from fc_manager.api.client import FCClient
 from fc_manager.deploy import (
     DeployService,
     parse_build,
     parse_deploy_info,
 )
-from fc_manager.errors import DeployFailed, UsageError
+from fc_manager.errors import DeployFailed, ErrorKind, SiteUpdateUnknown, UsageError
 from fc_manager.inventory import Bench, Team
 from fc_manager.redact import Credentials
 
@@ -168,15 +169,47 @@ def test_plan_only_removed_apps():
 # --- 3.3 service calls ----------------------------------------------------------------
 
 
-def routes(router, statuses, builds=None, infos=None):
-    """Mount deploy_status / client.get / deploy_information with response sequences."""
+def routes(
+    router, statuses, builds=None, infos=None, running=None, jobs=None, site_status="Active"
+):
+    """Mount deploy_status / client.get / deploy_information with response sequences, and
+    the site job reads: `running` (running_jobs answers; the last repeats) and `jobs`
+    (site.job answers per job name; the last repeats). With no `running`, each site has
+    one "Update Site Migrate" job that ends in Success."""
     status = router.get(method_url("press.api.bench.deploy_status"))
     status.side_effect = [httpx.Response(200, json={"message": s}) for s in statuses]
     build = router.get(method_url("press.api.client.get"))
     build.side_effect = [httpx.Response(200, json={"message": b}) for b in builds or []]
     info = router.get(method_url("press.api.bench.deploy_information"))
     info.side_effect = [httpx.Response(200, json={"message": i}) for i in infos or []]
+    running = list(running if running is not None else [[job_row()]])
+    jobs = {k: list(v) for k, v in (jobs or {"job-up": [job_doc("job-up", "Success")]}).items()}
+
+    def nxt(answers):
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    router.get(method_url("press.api.site.running_jobs")).mock(
+        side_effect=lambda r: httpx.Response(200, json={"message": nxt(running)})
+    )
+    router.get(method_url("press.api.site.job")).mock(
+        side_effect=lambda r: httpx.Response(200, json={"message": nxt(jobs[r.url.params["job"]])})
+    )
+    router.get(method_url("press.api.site.get")).respond(json={"message": {"status": site_status}})
     return status, build, info
+
+
+TOO_MANY = 'mariadb-dump: Got error: 1040: "Too many connections" when trying to connect'
+
+
+def job_row(name="job-up", job_type="Update Site Migrate", status="Running"):
+    return {"id": name, "name": job_type, "status": status}
+
+
+def job_doc(name, status, job_type="Update Site Migrate"):
+    step = {"step_name": "Backup Site Tables", "status": status, "output": ""}
+    if status == "Failure":
+        step["output"] = TOO_MANY
+    return {"name": name, "job_type": job_type, "status": status, "steps": [step]}
 
 
 def test_info_is_one_scoped_call():
@@ -252,7 +285,7 @@ def test_watch_new_flow_to_success_with_site_moved():
         )
         states = list(service().watch(plan, sleep=sleeps.append))
     assert stages(states) == ["validating", "building", "finishing", "success"]
-    assert states[-1].sites == (("name-20.example.com", True),)
+    assert [(r.site, r.result) for r in states[-1].sites] == [("name-20.example.com", "updated")]
     assert all(s >= 2.0 for s in sleeps)
     for route in (status, build, info):
         assert all(c.request.headers["X-Press-Team"] == "team-acme" for c in route.calls)
@@ -384,35 +417,134 @@ def test_watch_idle_polls_show_starting():
     assert stages(states) == ["starting", "building", "finishing", "success"]
 
 
-def test_watch_waits_for_site_move_after_bench_ready():
+def test_watch_waits_for_the_site_update_job_after_bench_ready():
     plan = make_plan(sites=["name-20.example.com"])
     with respx.mock(assert_all_called=False) as router:
         routes(
             router,
             statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}] * 2,
             builds=[done(), done()],
-            infos=[idle_info(), idle_info(), idle_info(site_bench="bench-3")],
+            infos=[idle_info(), idle_info()],
+            running=[[], [], [job_row()]],
         )
         states = list(service().watch(plan, sleep=lambda _s: None))
     assert stages(states) == ["finishing", "updating_sites", "success"]
     waiting = next(s for s in states if s.stage == "updating_sites")
-    assert waiting.sites == (("name-20.example.com", False),)
-    assert states[-1].sites == (("name-20.example.com", True),)
+    assert [(r.site, r.stage) for r in waiting.sites] == [("name-20.example.com", "finding")]
+    assert [(r.site, r.result) for r in states[-1].sites] == [("name-20.example.com", "updated")]
 
 
-def test_watch_site_not_confirmed_in_time():
-    from fc_manager.errors import SiteUpdateUnknown
+def watch_until_error(plan, error):
+    states = []
+    with pytest.raises(error) as info:
+        for state in service().watch(plan, sleep=lambda _s: None):
+            states.append(state)
+    return states, info.value
 
+
+def test_watch_site_update_fails_at_backup():
     plan = make_plan(sites=["name-20.example.com"])
-    ticks = iter(range(0, 10_000, 600))  # 10 minutes per clock read
+    with respx.mock(assert_all_called=False) as router:
+        routes(
+            router,
+            statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}],
+            builds=[done(), done()],
+            infos=[idle_info()],
+            running=[[job_row()], []],
+            jobs={"job-up": [job_doc("job-up", "Failure")]},
+            site_status="Active",
+        )
+        states, error = watch_until_error(plan, DeployFailed)
+    final = states[-1]
+    assert final.stage == "success"  # the bench deploy itself succeeded
+    result = final.sites[0]
+    assert (result.result, result.job, result.step) == (
+        "failed",
+        "Update Site Migrate",
+        "Backup Site Tables",
+    )
+    assert result.output == TOO_MANY
+    assert result.outcome == "restored"
+    assert error.exit_code == 8
+    assert "name-20.example.com" in error.message
+    assert "Backup Site Tables" in error.message
+    assert TOO_MANY in error.server_message
+
+
+def test_watch_one_site_updated_one_failed_exits_8():
+    data = info_data()
+    data["sites"].append(dict(data["sites"][0], name="name-21.example.com"))
+    sites = ["name-20.example.com", "name-21.example.com"]
+    plan = service().plan(parse_deploy_info(data, BENCH), apps=None, sites=sites)
+    with respx.mock(assert_all_called=False) as router:
+        routes(
+            router,
+            statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}],
+            builds=[done(), done()],
+            infos=[data],
+            running=[[job_row("job-a")], [job_row("job-b")], []],
+            jobs={"job-a": [job_doc("job-a", "Success")], "job-b": [job_doc("job-b", "Failure")]},
+        )
+        states, error = watch_until_error(plan, DeployFailed)
+    assert [(r.site, r.result) for r in states[-1].sites] == [
+        ("name-20.example.com", "updated"),
+        ("name-21.example.com", "failed"),
+    ]
+    assert error.kind == ErrorKind.JOB_FAILED
+    assert "name-21.example.com" in error.message
+    assert "name-20.example.com" not in error.message
+
+
+def test_watch_one_site_updated_one_not_known_exits_6(monkeypatch):
+    monkeypatch.setattr(deploy_module, "SITE_UPDATE_LIMIT_SECONDS", 0)
+    data = info_data()
+    data["sites"].append(dict(data["sites"][0], name="name-21.example.com"))
+    sites = ["name-20.example.com", "name-21.example.com"]
+    plan = service().plan(parse_deploy_info(data, BENCH), apps=None, sites=sites)
+    with respx.mock(assert_all_called=False) as router:
+        routes(
+            router,
+            statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}],
+            builds=[done(), done()],
+            infos=[data],
+            running=[[job_row("job-a")], []],
+            jobs={"job-a": [job_doc("job-a", "Success")]},
+        )
+        states, error = watch_until_error(plan, SiteUpdateUnknown)
+    assert [(r.site, r.result) for r in states[-1].sites] == [
+        ("name-20.example.com", "updated"),
+        ("name-21.example.com", "unknown"),
+    ]
+    assert error.kind == ErrorKind.SERVER
+
+
+def test_watch_site_not_found_in_time():
+    plan = make_plan(sites=["name-20.example.com"])
+    ticks = iter(range(0, 100_000, 600))  # 10 minutes per clock read
     with respx.mock(assert_all_called=False) as router:
         routes(
             router,
             statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}],
             builds=[done(), done()],
             infos=[idle_info()] * 20,
+            running=[[]],
         )
         with pytest.raises(SiteUpdateUnknown) as e:
             list(service().watch(plan, sleep=lambda _s: None, clock=lambda: next(ticks)))
     assert e.value.exit_code == 6
     assert "name-20.example.com" in e.value.message and "not known" in e.value.message
+
+
+def test_watch_no_selected_site_reads_no_site_job():
+    plan = make_plan(sites=[])
+    with respx.mock(assert_all_called=False) as router:
+        routes(
+            router,
+            statuses=[{"is_deploy_in_progress": True, "candidate": "b-new"}],
+            builds=[done(), done()],
+            infos=[idle_info()],
+        )
+        states = list(service().watch(plan, sleep=lambda _s: None))
+        reads = [c.request.url.path for c in router.calls]
+    assert states[-1].stage == "success" and states[-1].sites == ()
+    assert not any("running_jobs" in p or "site.job" in p for p in reads)

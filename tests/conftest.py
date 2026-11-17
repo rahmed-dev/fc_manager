@@ -200,23 +200,31 @@ class FakeFC:
     posts: list = field(default_factory=list)
     post_error: tuple | None = None  # (status, body) for the deploy or migrate POST
     teams_seen: list = field(default_factory=list)
-    # migrate: "Migrate Site" job rows, rows of other jobs, job docs (a sequence; the last
-    # repeats). running_jobs lists the Pending and Running rows. A migrate POST adds the
-    # Pending job "job-new".
+    # site jobs: "Migrate Site" job rows, rows of other jobs, job docs (a sequence, or a
+    # sequence per job name; the last repeats). running_jobs lists the Pending and Running
+    # rows. A migrate POST adds the Pending job "job-new".
     migrate_jobs: list = field(
         default_factory=lambda: [
             {"name": "job-old", "job_type": "Migrate Site", "status": "Success"}
         ]
     )
     other_jobs: list = field(default_factory=list)
-    job_docs: list = field(default_factory=list)
+    job_docs: list | dict = field(default_factory=list)
     migrate_posts: list = field(default_factory=list)
     migrate_makes_job: bool = True  # False: FC accepts the migrate, but no job shows up
     # update: check_for_updates bodies per site (default: the fixture when the site row has
-    # update_available, else no update), Site Update records (a sequence; the last
-    # repeats), the POST bodies, and the record name FC returns from the update POST.
+    # update_available, else no update), the POST bodies, and the record name FC returns
+    # from the update POST. An update POST adds the Pending job "job-new" of type Update
+    # Site Migrate (unless update_makes_job is False).
     update_infos: dict = field(default_factory=dict)
-    update_records: list = field(default_factory=list)
+    update_makes_job: bool = True
+    # bench-deploy: the deploy POST adds one "Update Site Migrate" job "job-up-<site>" for
+    # each selected site (unless deploy_makes_site_jobs is False). running_jobs hides it for
+    # the first site_job_hidden_polls reads (FC starts it after the bench is ready).
+    deploy_makes_site_jobs: bool = True
+    site_job_hidden_polls: int = 0
+    deploy_site_status: str = "Active"  # site.get of a site in a deploy POST
+    on_update_post: object = None  # called after the update POST: the FC state after it
     update_posts: list = field(default_factory=list)
     update_answer: object = "su-new"
     # add-app and install: all_apps rows (bench group), available_apps rows (site), and the
@@ -280,6 +288,12 @@ class FakeFC:
             if self.post_error:
                 status, body = self.post_error
                 return httpx.Response(status, json=body)
+            if self.deploy_makes_site_jobs:
+                for site in self.posts[-1].get("sites") or []:
+                    self.other_jobs.append(
+                        {"name": f"job-up-{site['name']}", "job_type": "Update Site Migrate",
+                         "status": "Pending", "site": site["name"]}
+                    )  # fmt: skip
             return httpx.Response(200, json={"message": "pipeline-1"})
         if method == "press.api.site.migrate":
             self.migrate_posts.append(json.loads(request.content))
@@ -296,6 +310,12 @@ class FakeFC:
             if self.post_error:
                 status, body = self.post_error
                 return httpx.Response(status, json=body)
+            if self.update_makes_job:
+                self.migrate_jobs.insert(
+                    0, {"name": "job-new", "job_type": "Update Site Migrate", "status": "Pending"}
+                )
+            if self.on_update_post:
+                self.on_update_post(self)
             return httpx.Response(200, json={"message": self.update_answer})
         if method in ("press.api.bench.add_apps", "press.api.client.run_doc_method"):
             self.add_posts.append(json.loads(request.content))
@@ -335,20 +355,16 @@ class FakeFC:
             if row is not None and row.get("update_available"):
                 return httpx.Response(200, json=fixture("site_check_for_updates.json"))
             return httpx.Response(200, json={"message": {"update_available": False}})
-        if method == "press.api.client.get" and request.url.params.get("doctype") == "Site Update":
-            done = {
-                "name": request.url.params["name"],
-                "status": "Success",
-                "source_bench": "bench-1234-000001-f1",
-                "destination_bench": "bench-1234-000002-f1",
-                "steps": [{"title": "Move Site", "status": "Success"}],
-            }
-            return httpx.Response(200, json={"message": self._next(self.update_records, done)})
         if method == "press.api.site.running_jobs":
+            site = request.url.params.get("name")
+            hidden = self.site_job_hidden_polls > 0
+            self.site_job_hidden_polls -= 1
             rows = [
                 {"id": j["name"], "name": j["job_type"], "status": j["status"], "steps": []}
                 for j in self.other_jobs + self.migrate_jobs
                 if j["status"] in ("Pending", "Running")
+                and j.get("site", site) == site
+                and not (hidden and "site" in j)
             ]
             return httpx.Response(200, json={"message": rows})
         if method == "press.api.site.job":
@@ -357,7 +373,11 @@ class FakeFC:
                 "status": "Success",
                 "steps": [{"step_name": "Migrate Site", "status": "Success", "duration": "3"}],
             }
-            return httpx.Response(200, json={"message": self._next(self.job_docs, done)})
+            # job_docs: one sequence for every job, or a sequence per job name
+            docs = self.job_docs
+            if isinstance(docs, dict):
+                docs = docs.get(request.url.params["job"], [])
+            return httpx.Response(200, json={"message": self._next(docs, done)})
         if method == "press.api.bench.deploy_information":
             seq = self.deploy_infos.get(request.url.params["name"])
             if seq is None:
@@ -395,6 +415,10 @@ class FakeFC:
                                 }
                             },
                         )
+            if any(name == x["name"] for post in self.posts for x in post.get("sites") or []):
+                return httpx.Response(
+                    200, json={"message": {"name": name, "status": self.deploy_site_status}}
+                )
             return httpx.Response(404, json=fixture("error_not_found.json"))
         if method == "press.api.site.installed_apps":
             return httpx.Response(200, json=fixture("site_installed_apps.json"))

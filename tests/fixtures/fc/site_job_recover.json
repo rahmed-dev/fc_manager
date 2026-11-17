@@ -1,0 +1,21 @@
+{
+ "message": {
+  "name": "job-22",
+  "creation": "2026-11-17 17:06:02.432152",
+  "job_type": "Recover Failed Site Update",
+  "status": "Success",
+  "start": "2026-11-17 11:36:03.233159",
+  "end": "2026-11-17 11:36:03.801177",
+  "duration": "0:00:0.568018",
+  "steps": [
+   {
+    "step_name": "Disable Maintenance Mode",
+    "status": "Success",
+    "start": "2026-11-17 11:36:03.243435",
+    "end": "2026-11-17 11:36:03.800326",
+    "duration": "0:00:0.556891",
+    "output": ""
+   }
+  ]
+ }
+}

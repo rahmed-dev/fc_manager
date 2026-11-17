@@ -28,7 +28,7 @@ The menu SHALL ask for the team first and then for a bench of that team, as the 
 - **THEN** the menu starts at the bench step for team `acme`
 
 ### Requirement: Action menu
-After the bench pick, the system SHALL show an action menu for that bench with these entries: show the bench (`bench-show`), deploy app updates (`bench-deploy`), add an app (`bench-add-app`), migrate a site (`site-migrate`), update a site (`site-update`), install an app (`site-install-app`), pick another bench, and quit. Each entry SHALL name its direct command. An action SHALL run with the same FC requests, preview and typed confirmation as its direct command for that bench.
+After the bench pick, the system SHALL show an action menu for that bench with these entries: show the bench (`bench-show`), deploy app updates (`bench-deploy`), add an app (`bench-add-app`), migrate a site (`site-migrate`), update a site (`site-update`), install an app (`site-install-app`), pick another bench, pick another team, and quit. Each action entry SHALL name its direct command. An action SHALL run with the same FC requests, preview and typed confirmation as its direct command.
 
 #### Scenario: Show from the menu
 - **WHEN** the user picks "Show bench" for bench `bench-1234`
@@ -53,6 +53,17 @@ After the bench pick, the system SHALL show an action menu for that bench with t
 #### Scenario: Install an app from the menu
 - **WHEN** the user picks "Install an app" for bench `bench-1234` and then site `erp.acme.example.com`
 - **THEN** the system runs the same checks, app step and preview as `fcm site-install-app erp.acme.example.com`, and sends no write request before the typed site name
+
+### Requirement: Team change from the action menu
+The system SHALL show the "Pick another team" entry only when the profile reaches more than one team. "Pick another team" SHALL open the team step of the menu walk. The system SHALL send no request to FC before the team step shows.
+
+#### Scenario: Pick another team
+- **WHEN** the profile reaches teams `acme` and `globex`, and the user picks "Pick another team" at the action menu of bench `bench-1234` in team `acme`
+- **THEN** the system shows the team step with both teams, sends no request to FC before the team step shows, and after the user picks `globex`, lists the benches of team `globex` only
+
+#### Scenario: One team, no team entry
+- **WHEN** the profile reaches only team `acme`
+- **THEN** the action menu shows no "Pick another team" entry, and shows "Pick another bench" and "Quit" as the last two entries
 
 ### Requirement: Target path on every prompt
 Every prompt in the menu walk SHALL show the target path that is known at that step: the profile, then the team label, then the bench title and name, then the site name after a site pick. A write action SHALL keep its own full preview.

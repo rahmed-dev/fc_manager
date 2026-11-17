@@ -4,6 +4,43 @@ All notable changes to `fcm` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-17
+
+### Changed
+
+- `bench-deploy` follows the FC update job of each selected site after the bench is ready.
+  It reports each site as updated, failed or not known. A failed site update names the
+  job, the failed step and what FC did with the site, and shows the FC output of the step.
+  Before, `fcm` only checked whether the site moved to the new bench, and it reported a
+  failed site update after 30 minutes as "not known".
+- **Exit code:** a `bench-deploy` with a failed site update now exits with code 8, not 6.
+  Code 6 stays for a site whose update job FC did not start in 30 minutes.
+- `site-update` follows the site jobs ("Update Site Migrate" or "Update Site Pull", and
+  the backup and recover jobs) and no longer reads the `Site Update` record. The success
+  text no longer names the new bench. When FC accepts the update with no record name, the
+  watch continues (before: exit 6). No update job in 2 minutes gives exit 6.
+- `site-migrate`, `site-install-app`, `site-update` and `bench-deploy` share one site job
+  watch. The migrate and install results do not change.
+
+### Removed
+
+- The "Cancelled" outcome of `site-update`. The FC jobs do not show a cancel; a cancelled
+  update shows no update job, so its result is "not known" (exit 6).
+
+### Known gaps
+
+- No live `site-update` or `bench-deploy` with a selected site ran with this version yet.
+  The job types "Update Site Migrate" and "Recover Failed Site Update" are confirmed from
+  live FC answers; "Update Site Pull" comes from the press source only.
+
+## [1.2.2] - 2026-11-17
+
+### Added
+
+- The action menu has the entry "Pick another team", after "Pick another bench". It opens
+  the team step again, with no request to FC. It shows only when the login reaches more
+  than one team.
+
 ## [1.2.1] - 2026-11-10
 
 ### Changed
